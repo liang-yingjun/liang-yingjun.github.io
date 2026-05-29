@@ -575,6 +575,70 @@
     ]
   };
 
+  /** Boss 单场血线阶段：按当前 HP% 切换行为，非单纯加数值 */
+  const BOSS_PHASE_HP = { p2: 0.66, p3: 0.33 };
+  const BOSS_PHASE_LABELS = {
+    golem: ['岭立', '崩岩', '怒震'],
+    assassin: ['潜行', '刺杀', '绝影'],
+    queen: ['燃舞', '灼域', '焚心'],
+    lich: ['寒霜', '汲取', '冰狱'],
+    mech: ['轰击', '装甲', '过载'],
+    voidlord: ['虚空', '暗影', '熵灭'],
+    plague: ['瘟疫', '腐化', '双灾'],
+    storm: ['雷击', '罡风', '霜暴'],
+    phoenix: ['烈焰', '灼羽', '涅槃'],
+    abyss: ['深渊', '恐惧', '湮灭']
+  };
+  const BOSS_PHASE_HINTS = {
+    golem: ['', '震地、寒霜技能解锁', '半血落石；连锁≥3 时追加石化'],
+    assassin: ['', '暗影铺场', '毒藤；偷行动成功时追加暗影'],
+    queen: ['', '灼域技能解锁', '藤蔓；清火反伤（固定灼烧反噬）'],
+    lich: ['', '汲取与碎盾', '冰盾层数累积'],
+    mech: ['', '装甲与过载陷阱', '电磁脉冲碎盾'],
+    voidlord: ['', '暗影铺场', '熵灭；熵灭时追加暗影'],
+    plague: ['', '腐化直伤', '双灾与汲取；腐化时蔓延藤蔓'],
+    storm: ['', '冰雹与罡风', '静电与霜风；雷击时附带寒霜'],
+    phoenix: ['', '灼域', '羽烬；无火格时仍点燃'],
+    abyss: ['', '恐惧与影盾', '湮灭波与湮灭；湮灭时铺暗影']
+  };
+
+  function getBossHpPhase(boss) {
+    if (!boss || boss.maxHp <= 0) return 1;
+    const r = boss.hp / boss.maxHp;
+    if (r > BOSS_PHASE_HP.p2) return 1;
+    if (r > BOSS_PHASE_HP.p3) return 2;
+    return 3;
+  }
+
+  function bossPhase() {
+    if (!state?.boss || isPvp()) return 1;
+    if (state.boss.phase) return state.boss.phase;
+    return getBossHpPhase(state.boss);
+  }
+
+  function syncBossPhase(announce = true) {
+    const b = state?.boss;
+    if (!b || isPvp() || b.hp <= 0) return;
+    const p = getBossHpPhase(b);
+    const prev = b.phase || 1;
+    b.phase = p;
+    if (!announce || p <= prev || !layout) return;
+    const label = BOSS_PHASE_LABELS[b.kind]?.[p - 1] || `阶段${p}`;
+    const hint = BOSS_PHASE_HINTS[b.kind]?.[p] || '';
+    spawnPopup(layout.boss.cx, layout.boss.cy - 40, `『${label}』`, p >= 3 ? '#ff8866' : '#ffcc88', 17, true);
+    if (hint) spawnPopup(layout.boss.cx, layout.boss.cy - 16, hint, 'rgba(255,255,255,0.9)', 12);
+    bossCastFx();
+  }
+
+  function runBossPhaseExtras() {
+    const b = state?.boss;
+    if (!b || b.hp <= 0 || bossPhase() < 3) return;
+    if (b.kind === 'golem' && (state.lastSwapMaxChain || 0) >= 3) {
+      stoneTiles(1);
+      spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 18, '怒震：连锁落石', '#d8c0a0', 14);
+    }
+  }
+
   function bossSkillUnlocked(kind, sub, minSub) {
     return sub >= minSub;
   }
@@ -1124,11 +1188,21 @@
   function unlockAudio() {
     ensureAudio();
     if (!audio.ctx) return;
-    if (audio.ctx.state === 'suspended') audio.ctx.resume();
-    if (!audio.unlocked) {
-      audio.unlocked = true;
-      if (audio.settings.musicOn) startBgm();
+    if (audio.ctx.state === 'suspended') {
+      audio.ctx.resume().catch(() => {});
     }
+    audio.unlocked = true;
+    if (audio.settings.musicOn && !audio.bgmTimer) startBgm();
+  }
+
+  function resumeAudioIfNeeded() {
+    ensureAudio();
+    if (!audio.ctx) return;
+    if (audio.ctx.state === 'suspended') {
+      audio.ctx.resume().catch(() => {});
+    }
+    applyAudioVolumes();
+    if (audio.settings.musicOn && !audio.bgmTimer) startBgm();
   }
 
   function playSfx(kind, opts = {}) {
@@ -1589,7 +1663,9 @@
   function getBossDodgeChance() {
     if (!state || isPvp()) return 0;
     const seg = Math.floor((state.level - 1) / BOSS_SEGMENT);
-    return clamp(BOSS_DODGE_BASE + seg * 0.015 + (state.level - 1) * 0.001, 0, 0.28);
+    let c = clamp(BOSS_DODGE_BASE + seg * 0.015 + (state.level - 1) * 0.001, 0, 0.28);
+    if (state.bossDodgeStrip) c = Math.max(0, c - state.bossDodgeStrip);
+    return c;
   }
 
   function getBuffShieldCarryover(src = state) {
@@ -1688,6 +1764,56 @@
     return '险胜过关';
   }
 
+  function getStarRewardDesc(stars) {
+    if (stars >= 3) return '下关开局 +1 行动力';
+    if (stars >= 2) return '下关开局 +5 护盾';
+    return '下关无额外嘉奖';
+  }
+
+  function applyPrevStarBonus(s, stars) {
+    if (!s || isPvp() || !stars) return;
+    if (stars >= 3) {
+      s.action = Math.min(s.maxAction, s.action + 1);
+      if (layout) spawnPopup(layout.w / 2, layout.h * 0.3, '三星嘉奖 · +1 行动', '#ffd54f', 15, true);
+    } else if (stars >= 2) {
+      s.shield = Math.min(40, (s.shield || 0) + 5);
+      if (layout) spawnPopup(layout.w / 2, layout.h * 0.3, '双星嘉奖 · +5 护盾', '#b8d4ff', 15, true);
+    }
+  }
+
+  /** 连锁/大消除称号与小奖励 */
+  function resolveComboMoment(chain, matches) {
+    if (isPvp() || !layout || !state) return;
+    const maxCells = matches.reduce((m, x) => Math.max(m, x.cells?.length || 0), 0);
+    let entry = null;
+    if (chain >= 6) entry = { title: '天地惊变！', sub: '+3 护盾', color: '#ff8899', reward: 'shield3', big: true };
+    else if (chain >= 5) entry = { title: '惊天动地！', sub: '下击必中', color: '#ffb088', reward: 'antiDodge', big: true };
+    else if (chain >= 4) entry = { title: '狂风骤雨！', sub: '下击伤害 +8%', color: '#ffe9a8', reward: 'dmg8', big: true };
+    else if (chain >= 3) entry = { title: '势如破竹！', sub: '下击伤害 +5%', color: '#b8ffd0', reward: 'dmg5', big: false };
+    else if (chain >= 2) entry = { title: '连击！', sub: '', color: '#ffffff', reward: null, big: false };
+    else if (maxCells >= 7) entry = { title: '满堂红！', sub: '下击伤害 +5%', color: '#ffd54f', reward: 'dmg5', big: true };
+    else if (maxCells >= 5) entry = { title: '大快朵颐！', sub: '', color: '#c8e8ff', reward: null, big: false };
+    if (!entry) return;
+    const y = layout.h * (entry.big ? 0.32 : 0.36);
+    spawnPopup(layout.w / 2, y, entry.title, entry.color, entry.big ? 20 : 16, entry.big);
+    if (entry.sub) spawnPopup(layout.w / 2, y + 24, entry.sub, 'rgba(255,255,255,0.88)', 12);
+    applyComboReward(entry.reward);
+  }
+
+  function applyComboReward(reward) {
+    if (!reward || !state) return;
+    if (reward === 'dmg5') state.nextDamageBonus = (state.nextDamageBonus || 0) + 0.05;
+    if (reward === 'dmg8') state.nextDamageBonus = (state.nextDamageBonus || 0) + 0.08;
+    if (reward === 'shield3') state.shield = Math.min(40, (state.shield || 0) + 3);
+    if (reward === 'antiDodge') state.bossDodgeStrip = 0.15;
+  }
+
+  function clearComboCarry() {
+    if (!state) return;
+    state.nextDamageBonus = 0;
+    state.bossDodgeStrip = 0;
+  }
+
   function getLevelSelectPageCount() {
     return Math.ceil(MAX_LEVEL / LEVEL_SELECT_PAGE_SIZE);
   }
@@ -1773,7 +1899,11 @@
     ctx.fillStyle = stars >= 3 ? '#ffd54f' : stars >= 2 ? '#c8e8ff' : 'rgba(255,255,255,0.75)';
     ctx.font = withMixedFont(15, 'bold');
     ctx.fillText(starResultLabel(stars), cx, y);
-    y += 28;
+    y += 22;
+    ctx.fillStyle = stars >= 3 ? '#b8ffd0' : stars >= 2 ? '#c8e8ff' : 'rgba(255,255,255,0.45)';
+    ctx.font = withMixedFont(12);
+    ctx.fillText(`评星嘉奖：${getStarRewardDesc(stars)}`, cx, y);
+    y += 24;
 
     const drawStatBar = (label, cur, max, color, icon) => {
       const barH = 10;
@@ -1911,7 +2041,8 @@
         phantomHp: state.boss.phantomHp,
         firstArmorDone: !!state.boss.firstArmorDone,
         iceBarrier: state.boss.iceBarrier || 0,
-        rebirthDone: !!state.boss.rebirthDone
+        rebirthDone: !!state.boss.rebirthDone,
+        phase: state.boss.phase || 1
       },
       board: boardToSave(state.board),
       boardShape: state.levelData?.boardShape || 'full',
@@ -2275,6 +2406,7 @@
       state.boss.firstArmorDone = !!b.firstArmorDone;
       state.boss.iceBarrier = b.iceBarrier || 0;
       state.boss.rebirthDone = !!b.rebirthDone;
+      state.boss.phase = clamp(b.phase ?? getBossHpPhase(state.boss), 1, 3);
     }
     fx.displayBossHp = state.boss.hp;
     fx.displayPlayerHp = state.hp;
@@ -2333,6 +2465,8 @@
       canAdvance: true,
       showStarResult: false,
       winStars: 0,
+      nextDamageBonus: 0,
+      bossDodgeStrip: 0,
       mods: {},
       boss: {
         kind: meta.kind,
@@ -2367,7 +2501,8 @@
         burns: [],
         firstArmorDone: false,
         iceBarrier: 0,
-        rebirthDone: false
+        rebirthDone: false,
+        phase: 1
       },
       levelData: data,
       boardMask
@@ -2395,11 +2530,13 @@
     applyMaxHpFromMods(s);
     applyLevelStartBonuses(s);
     if (opts.applyPendingShield) applyBufferedTurnShield(s);
+    if (opts.prevStarBonus) applyPrevStarBonus(s, opts.prevStarBonus);
     s.startAction = s.action;
     grantShuffleCards(s);
     if (data.initialStone) applyHazardTiles('stone', data.initialStone, s);
     fx.displayBossHp = s.boss.hp;
     fx.displayPlayerHp = s.hp;
+    s.boss.phase = getBossHpPhase(s.boss);
     if (s.runBuffs.length && level > 1) showBuffStartToast(s);
     if ((level - 1) % BOSS_SEGMENT === 0) {
       s.pendingBossIntro = meta.name;
@@ -2807,11 +2944,15 @@
   }
 
   function hurtBoss(dmg, big = false) {
-    if (dmg > 0 && Math.random() < getBossDodgeChance()) {
-      playSfx('block');
-      spawnPopup(layout.boss.cx, layout.boss.cy - 12, '闪避', '#c8b0ff', 16, true);
-      burstParticles(layout.boss.cx, layout.boss.cy, '#9b67ff', 6);
-      return;
+    if (dmg > 0) {
+      const dodgeChance = getBossDodgeChance();
+      if (state.bossDodgeStrip) state.bossDodgeStrip = 0;
+      if (Math.random() < dodgeChance) {
+        playSfx('block');
+        spawnPopup(layout.boss.cx, layout.boss.cy - 12, '闪避', '#c8b0ff', 16, true);
+        burstParticles(layout.boss.cx, layout.boss.cy, '#9b67ff', 6);
+        return;
+      }
     }
     if (dmg > 0) playSfx('bossHit', { big });
     let real = dmg;
@@ -2828,6 +2969,7 @@
       real = dmg - absorbed;
     }
     state.boss.hp = Math.max(0, state.boss.hp - real);
+    syncBossPhase();
     if (state.boss.hp > 0) tryPhoenixRebirth();
     if (state.boss.hp <= 0) fx.displayBossHp = 0;
     fx.bossHit = 420;
@@ -2936,6 +3078,10 @@
 
   function onFireHazardCleared() {
     if (state.boss.igniteBurnOnClear) hurtBoss(state.boss.igniteBurnOnClear);
+    else if (state.boss.kind === 'queen' && bossPhase() >= 3) {
+      hurtBoss(6);
+      spawnPopup(layout.boss.cx, layout.boss.cy + 12, '焚心反噬', '#ff6644', 13);
+    }
   }
 
   function countHazardFire() {
@@ -3308,6 +3454,8 @@
     }
 
     inputLocked = true;
+    clearComboCarry();
+    state.lastSwapMaxChain = 0;
     try {
       playSfx('swap');
       await animateSwap(from, to, 160);
@@ -3341,14 +3489,17 @@
       await endTurn();
       ensurePlayable();
     } finally {
+      clearComboCarry();
       inputLocked = false;
     }
   }
 
   async function resolveBoard(firstMatches) {
     let chain = 1;
+    let maxChain = 1;
     let matches = firstMatches.length ? firstMatches : findMatches(state.board);
     while (matches.length && chain <= 8) {
+      maxChain = Math.max(maxChain, chain);
       const clearMap = emptyMap();
       const specials = [];
 
@@ -3380,9 +3531,11 @@
           fx.beams.push({ type: 'spawn', row: s.row, col: s.col, t: 0, dur: 320 });
         }
       });
+      resolveComboMoment(chain, matches);
       matches = findMatches(state.board);
       chain += 1;
     }
+    state.lastSwapMaxChain = maxChain;
   }
 
   async function runSpecialSwap(from, to) {
@@ -3499,6 +3652,10 @@
     dmg = dmg * (1 + (m.extraDamage || 0));
     if (m.focusBonus && state.boss.hp <= state.boss.maxHp * 0.5) dmg *= (1 + m.focusBonus);
     dmg = Math.max(1, Math.floor(dmg * (1 + state.boss.vulnerableBonus) * (1 - reduction)));
+    if (state.nextDamageBonus && dmg > 0) {
+      dmg = Math.max(1, Math.floor(dmg * (1 + state.nextDamageBonus)));
+      state.nextDamageBonus = 0;
+    }
     hurtBoss(dmg, count >= 5 || chainBonus);
     if (type === 'flame' && count >= 4) for (let i = 0; i < (count >= 5 ? 2 : 1); i++) state.boss.burns.push({ turns: 2 });
     const freezeChance = (count >= 5 ? 0.5 : 0.25) + ((state.mods || {}).freezeBonus || 0);
@@ -3667,6 +3824,7 @@
   function bossSkill() {
     const b = state.boss;
     const t = state.turn;
+    const ph = bossPhase();
     if (b.kind === 'golem') {
       let armorTurn = false;
       if (b.armorEvery && t % b.armorEvery === 0 && b.armor < b.maxArmor) {
@@ -3680,18 +3838,19 @@
         } else if (b.stoneOnArmor) stoneTiles(b.stoneOnArmor);
       }
       if (b.periodicStoneEvery && t % b.periodicStoneEvery === 0 && !armorTurn) stoneTiles(b.periodicStoneCount);
-      if (b.halfStoneEvery && b.hp <= b.maxHp / 2 && t % b.halfStoneEvery === 0) stoneTiles(b.halfStoneCount);
-      if (b.halfStoneExtra && b.hp <= b.maxHp / 2 && t % b.armorEvery === 0) stoneTiles(1);
-      if (b.slamEvery && t % b.slamEvery === 0) {
+      if (ph >= 3 && b.halfStoneEvery && t % b.halfStoneEvery === 0) stoneTiles(b.halfStoneCount);
+      if (ph >= 3 && b.halfStoneExtra && t % b.armorEvery === 0) stoneTiles(1);
+      if (ph >= 2 && b.slamEvery && t % b.slamEvery === 0) {
         bossCastFx();
         dealBossDamageToPlayer(b.slamDmg);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `震地 -${b.slamDmg}`, '#d8c0a0', 14);
       }
-      if (b.frostEvery && t % b.frostEvery === 0) {
+      if (ph >= 2 && b.frostEvery && t % b.frostEvery === 0) {
         bossCastFx();
         applyHazardTiles('frost', b.frostCount || 1);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '寒霜降临', '#9ce8ff', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'assassin') {
@@ -3707,18 +3866,20 @@
             dealBossDamageToPlayer(b.backstabDmg);
             spawnPopup(layout.boss.cx, layout.boss.cy - 28, `背刺 -${b.backstabDmg}`, '#ff8899', 13);
           }
+          if (ph >= 3) applyHazardTiles('shadow', 1);
           burstParticles(layout.boss.cx, layout.boss.cy, '#9b67ff', 6);
         }
       }
-      if (b.shadowEvery && t % b.shadowEvery === 0) {
+      if (ph >= 2 && b.shadowEvery && t % b.shadowEvery === 0) {
         bossCastFx();
         applyHazardTiles('shadow', b.shadowCount || 1);
       }
-      if (b.poisonEvery && t % b.poisonEvery === 0) {
+      if (ph >= 3 && b.poisonEvery && t % b.poisonEvery === 0) {
         bossCastFx();
         applyHazardTiles('vine', b.poisonCount || 1);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '毒藤蔓延', '#6fdc7a', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'queen') {
@@ -3727,7 +3888,7 @@
         igniteTiles(b.igniteCount);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '烈焰点燃', '#ff8844', 14);
       }
-      if (b.scorchEvery && t % b.scorchEvery === 0) {
+      if (ph >= 2 && b.scorchEvery && t % b.scorchEvery === 0) {
         const fires = countHazardFire();
         if (fires > 0) {
           const dmg = b.scorchDmg + fires;
@@ -3736,10 +3897,11 @@
           spawnPopup(layout.boss.cx, layout.boss.cy - 28, `灼域 -${dmg}`, '#ff6644', 14);
         }
       }
-      if (b.vineEvery && t % b.vineEvery === 0) {
+      if (ph >= 3 && b.vineEvery && t % b.vineEvery === 0) {
         bossCastFx();
         applyHazardTiles('vine', b.vineCount || 1);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'lich') {
@@ -3748,37 +3910,38 @@
         applyHazardTiles('frost', b.frostCount || 1);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '冰封术', '#b8ecff', 14);
       }
-      if (b.drainEvery && t % b.drainEvery === 0) {
+      if (ph >= 2 && b.drainEvery && t % b.drainEvery === 0) {
         bossCastFx();
         healBoss(b.drainHeal || 12);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, '灵魂汲取', '#c8e8ff', 14);
       }
-      if (b.curseEvery && t % b.curseEvery === 0 && state.shield > 0) {
+      if (ph >= 2 && b.curseEvery && t % b.curseEvery === 0 && state.shield > 0) {
         bossCastFx();
         const cut = Math.min(state.shield, b.curseShield || 4);
         state.shield -= cut;
         spawnPopup(layout.player.cx, layout.player.cy + 16, `诅咒碎盾 -${cut}`, '#9ab8ff', 14);
       }
-      if (b.iceShieldEvery && t % b.iceShieldEvery === 0) {
+      if (ph >= 3 && b.iceShieldEvery && t % b.iceShieldEvery === 0) {
         b.iceBarrier = Math.min(b.iceShieldMax || 2, (b.iceBarrier || 0) + 1);
         bossCastFx();
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `冰盾 +${b.iceBarrier}`, '#9ce8ff', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'mech') {
-      if (b.armorEvery && t % b.armorEvery === 0 && b.armor < (b.maxArmor || 0)) {
+      if (ph >= 2 && b.armorEvery && t % b.armorEvery === 0 && b.armor < (b.maxArmor || 0)) {
         b.armor++;
         bossCastFx();
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, '装甲 +1', '#b0c0d0', 14);
       }
-      if (b.overloadEvery && t % b.overloadEvery === 0) {
+      if (ph >= 2 && b.overloadEvery && t % b.overloadEvery === 0) {
         bossCastFx();
         stoneTiles(b.overloadStone || 1);
         if (b.overloadFrost) applyHazardTiles('frost', b.overloadFrost);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '过载陷阱', '#a0b8d0', 14);
       }
-      if (b.pulseEvery && t % b.pulseEvery === 0 && state.shield > 0) {
+      if (ph >= 3 && b.pulseEvery && t % b.pulseEvery === 0 && state.shield > 0) {
         bossCastFx();
         const cut = Math.min(state.shield, b.pulseShield || 3);
         state.shield -= cut;
@@ -3789,6 +3952,7 @@
         dealBossDamageToPlayer(b.barrageDmg || 8);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `轰击 -${b.barrageDmg}`, '#c0d0e0', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'voidlord') {
@@ -3798,15 +3962,17 @@
         if (b.voidLeech) healBoss(b.voidLeech);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, '虚空汲取', '#9b67ff', 14);
       }
-      if (b.shadowEvery && t % b.shadowEvery === 0) {
+      if (ph >= 2 && b.shadowEvery && t % b.shadowEvery === 0) {
         bossCastFx();
         applyHazardTiles('shadow', b.shadowCount || 1);
       }
-      if (b.entropyEvery && t % b.entropyEvery === 0) {
+      if (ph >= 3 && b.entropyEvery && t % b.entropyEvery === 0) {
         bossCastFx();
         dealBossDamageToPlayer(b.entropyDmg || 6);
+        applyHazardTiles('shadow', 1);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `熵灭 -${b.entropyDmg}`, '#7b5cff', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'plague') {
@@ -3815,33 +3981,35 @@
         applyHazardTiles('vine', b.plagueCount || 1);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '瘟疫蔓延', '#6fdc7a', 14);
       }
-      if (b.rotEvery && t % b.rotEvery === 0) {
+      if (ph >= 2 && b.rotEvery && t % b.rotEvery === 0) {
         bossCastFx();
         dealBossDamageToPlayer(b.rotDmg || 3);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `腐化 -${b.rotDmg}`, '#88aa66', 14);
+        if (ph >= 3) applyHazardTiles('vine', 1);
       }
-      if (b.blightEvery && t % b.blightEvery === 0) {
+      if (ph >= 3 && b.blightEvery && t % b.blightEvery === 0) {
         bossCastFx();
         if (b.blightStone) stoneTiles(b.blightStone);
         if (b.blightVine) applyHazardTiles('vine', b.blightVine);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '双灾降临', '#7a9a58', 14);
       }
-      if (b.drainEvery && t % b.drainEvery === 0) {
+      if (ph >= 3 && b.drainEvery && t % b.drainEvery === 0) {
         bossCastFx();
         healBoss(b.drainHeal || 10);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, '瘟疫汲取', '#a8c878', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'storm') {
-      if (b.squallEvery && t % b.squallEvery === 0) {
+      if (ph >= 2 && b.squallEvery && t % b.squallEvery === 0) {
         if (state.action >= (b.squallThreshold || 7)) {
           bossCastFx();
           dealBossDamageToPlayer(b.squallDmg || 8);
           spawnPopup(layout.boss.cx, layout.boss.cy - 28, `罡风 -${b.squallDmg}`, '#88ccff', 14);
         }
       }
-      if (b.hailEvery && t % b.hailEvery === 0) {
+      if (ph >= 2 && b.hailEvery && t % b.hailEvery === 0) {
         bossCastFx();
         stoneTiles(b.hailCount || 1);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '冰雹封格', '#b8e8ff', 14);
@@ -3850,18 +4018,20 @@
         bossCastFx();
         dealBossDamageToPlayer(b.boltDmg || 6);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `雷击 -${b.boltDmg}`, '#ffe060', 14);
+        if (ph >= 3) applyHazardTiles('frost', 1);
       }
-      if (b.staticEvery && t % b.staticEvery === 0 && state.shield > 0) {
+      if (ph >= 3 && b.staticEvery && t % b.staticEvery === 0 && state.shield > 0) {
         bossCastFx();
         const cut = Math.min(state.shield, b.staticCut || 3);
         state.shield -= cut;
         spawnPopup(layout.player.cx, layout.player.cy + 16, `静电 -${cut}盾`, '#a0d8ff', 14);
       }
-      if (b.frostEvery && t % b.frostEvery === 0) {
+      if (ph >= 3 && b.frostEvery && t % b.frostEvery === 0) {
         bossCastFx();
         applyHazardTiles('frost', b.frostCount || 1);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '霜风降临', '#9ce8ff', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'phoenix') {
@@ -3870,24 +4040,29 @@
         igniteTiles(b.igniteCount);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '烈焰点燃', '#ff8844', 14);
       }
-      if (b.scorchEvery && t % b.scorchEvery === 0) {
+      if (ph >= 2 && b.scorchEvery && t % b.scorchEvery === 0) {
         const fires = countHazardFire();
         if (fires > 0) {
           const dmg = b.scorchDmg + fires;
           bossCastFx();
           dealBossDamageToPlayer(dmg);
           spawnPopup(layout.boss.cx, layout.boss.cy - 28, `灼域 -${dmg}`, '#ff6644', 14);
+        } else if (ph >= 3) {
+          bossCastFx();
+          igniteTiles(1);
+          spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '涅槃余烬', '#ff8844', 14);
         }
       }
-      if (b.featherEvery && t % b.featherEvery === 0) {
+      if (ph >= 3 && b.featherEvery && t % b.featherEvery === 0) {
         bossCastFx();
         igniteTiles(b.featherCount || 1);
         spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 20, '羽烬飘落', '#ffaa66', 14);
       }
+      runBossPhaseExtras();
       return;
     }
     if (b.kind === 'abyss') {
-      if (b.armorEvery && t % b.armorEvery === 0 && b.armor < (b.maxArmor || 0)) {
+      if (ph >= 2 && b.armorEvery && t % b.armorEvery === 0 && b.armor < (b.maxArmor || 0)) {
         b.armor++;
         bossCastFx();
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `影盾 +${b.armor}`, '#5a4898', 14);
@@ -3898,23 +4073,25 @@
         if (b.voidLeech) healBoss(b.voidLeech);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, '深渊汲取', '#7b5cff', 14);
       }
-      if (b.dreadEvery && t % b.dreadEvery === 0) {
+      if (ph >= 2 && b.dreadEvery && t % b.dreadEvery === 0) {
         bossCastFx();
         dealBossDamageToPlayer(b.dreadDmg || 4);
         if (b.dreadShadow) applyHazardTiles('shadow', b.dreadShadow);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `恐惧 -${b.dreadDmg}`, '#4a3878', 14);
       }
-      if (b.entropyEvery && t % b.entropyEvery === 0) {
+      if (ph >= 3 && b.entropyEvery && t % b.entropyEvery === 0) {
         bossCastFx();
         dealBossDamageToPlayer(b.entropyDmg || 7);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `湮灭波 -${b.entropyDmg}`, '#6b4cff', 14);
       }
-      if (b.oblivionEvery && t % b.oblivionEvery === 0) {
+      if (ph >= 3 && b.oblivionEvery && t % b.oblivionEvery === 0) {
         bossCastFx();
         dealBossDamageToPlayer(b.oblivionDmg || 5);
         stoneTiles(1);
+        if (b.dreadShadow) applyHazardTiles('shadow', b.dreadShadow);
         spawnPopup(layout.boss.cx, layout.boss.cy - 28, `湮灭 -${b.oblivionDmg}`, '#3a2878', 14);
       }
+      runBossPhaseExtras();
     }
   }
 
@@ -5249,6 +5426,7 @@
     if (state.status === 'playing') return;
     let next = state.level;
     const buffs = state.runBuffs || [];
+    const prevStars = state.status === 'win' ? (state.winStars || 0) : 0;
     if (state.status === 'win' && state.level < MAX_LEVEL) next = state.level + 1;
     else if (state.status === 'lose') next = state.level;
     else if (state.status === 'win') {
@@ -5264,7 +5442,8 @@
       ...getBuffShieldCarryover(),
       applyPendingShield: true,
       skipTutorial: true,
-      tutorialDone: true
+      tutorialDone: true,
+      prevStarBonus: prevStars
     });
     resetFx();
     selected = null;
@@ -5406,6 +5585,7 @@
 
   function onPointerDown(e) {
     if (e.cancelable) e.preventDefault();
+    resumeAudioIfNeeded();
     if (state?.showLevelSelect || state?.showModeSelect || state?.buffPicker
       || state?.showPvpSetup || state?.showStarResult) {
       syncViewportNow();
@@ -5751,7 +5931,10 @@
     ctx.textAlign = 'left';
     ctx.font = 'bold 11px sans-serif';
     ctx.fillStyle = '#ff9a8a';
-    ctx.fillText(state.boss.name, d.x + pad, d.y + 16);
+    const ph = bossPhase();
+    const phLabel = BOSS_PHASE_LABELS[state.boss.kind]?.[ph - 1];
+    const bossTitle = phLabel ? `${state.boss.name}『${phLabel}』` : state.boss.name;
+    ctx.fillText(bossTitle, d.x + pad, d.y + 16);
     ctx.textAlign = 'right';
     ctx.fillStyle = '#8ee8b8';
     ctx.fillText('勇者', d.x + d.w - pad, d.y + 16);
@@ -7408,10 +7591,14 @@
   window.addEventListener('beforeunload', saveGame);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') saveGame();
-    else setTimeout(syncViewportNow, 50);
+    else {
+      setTimeout(syncViewportNow, 50);
+      resumeAudioIfNeeded();
+    }
   });
   window.addEventListener('pageshow', (e) => {
     syncViewportNow();
+    resumeAudioIfNeeded();
     if (e.persisted) {
       const snap = loadGame();
       if (snap) {
@@ -7426,7 +7613,10 @@
     vv.addEventListener('resize', onViewportChange);
     vv.addEventListener('scroll', onViewportChange);
   }
-  window.addEventListener('focus', syncViewportNow);
+  window.addEventListener('focus', () => {
+    syncViewportNow();
+    resumeAudioIfNeeded();
+  });
 
   clearLegacySaves();
   loadDevSettings();
