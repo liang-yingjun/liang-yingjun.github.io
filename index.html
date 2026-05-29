@@ -122,9 +122,13 @@
   }
   const PVP_BUFF_PICK_COUNT = 3;
   const PVP_BUFF_CHOICE_COUNT = 5;
-  const BOSS_HP_BONUS = 100;
+  const BOSS_HP_BONUS = 150;
   const STONE_CAP = 8;
   const MIN_MOVES = 6;
+  /** Boss 攻击无视护盾的基础概率 */
+  const BOSS_TRUE_DAMAGE_BASE = 0.18;
+  /** Boss 闪避玩家伤害的基础概率 */
+  const BOSS_DODGE_BASE = 0.10;
 
   const ITEMS = [
     { id: 'flame', emoji: '🔥', color: '#e84838', accent: '#ffb088', dark: '#8c2218', border: '#ffd54f', damage: 4 },
@@ -165,26 +169,26 @@
     'full', 'ring', 'convex', 'concave', 'cross', 'diamond', 'split', 'pillars', 'zigzag', 'fortress'
   ];
   const BUFF_POOL = [
-    { id: 'sharp', name: '锋锐之刃', desc: '全部伤害 +12%', emoji: '⚔️', tip: '伤害×1.12' },
-    { id: 'shield', name: '铁壁意志', desc: '下关首回合 +12 护盾（仅该回合）', emoji: '🛡️', tip: '下关首回合+12盾' },
-    { id: 'swift', name: '迅捷步伐', desc: '每关开局 +1 行动力', emoji: '⚡', tip: '开局行动+1' },
-    { id: 'heal', name: '生命涌泉', desc: '生命上限 +10（立即生效）', emoji: '💚', tip: '上限+10' },
-    { id: 'regen', name: '复苏之泉', desc: '玩家回合结束 25% 净化石化，每选+2 格上限', emoji: '💧', tip: '25%清石化' },
-    { id: 'bulwark', name: '坚守之躯', desc: 'Boss 每回合反击固定 -3 伤', emoji: '🏰', tip: '反击-3' },
-    { id: 'sanctuary', name: '圣域护佑', desc: 'Boss 反击伤害 -15%', emoji: '✝️', tip: '反击×0.85' },
-    { id: 'aegis', name: '天佑护盾', desc: '每回合结束 +3 护盾', emoji: '🌟', tip: '回合末+3盾' },
-    { id: 'thorns', name: '荆棘反刺', desc: '受 Boss 反击后反弹 4 伤', emoji: '🌵', tip: '受击反伤4' },
-    { id: 'vitality', name: '强健体魄', desc: '生命上限 +12（立即生效）', emoji: '💪', tip: '上限+12' },
-    { id: 'flame', name: '烈焰之心', desc: '火焰每次 +2 伤害', emoji: '🔥', tip: '火焰+2/颗' },
-    { id: 'ember', name: '余烬灼烧', desc: '燃烧跳伤 +4/层', emoji: '🕯️', tip: '燃烧+4' },
-    { id: 'frostbite', name: '极寒指环', desc: '冻结概率 +15%', emoji: '❄️', tip: '冻结+15%' },
-    { id: 'spring', name: '春华恬静', desc: '每次消除生命棋 +3 血', emoji: '🌸', tip: '生命消+3血' },
-    { id: 'break', name: '破岩之力', desc: '无视 Boss 5% 减伤', emoji: '💥', tip: '穿透5%' },
-    { id: 'chain', name: '连锁大师', desc: '连锁伤害 +10%', emoji: '🔗', tip: '连锁×1.10' },
-    { id: 'lucky', name: '幸运洗牌', desc: '每关获 1 张洗牌锦囊', emoji: '🍀', tip: '洗牌牌+1' },
-    { id: 'expand', name: '拓土开疆', desc: '每关开始 20% 几率拓开 1 连通格', emoji: '🗺️', tip: '20%拓格+1' },
-    { id: 'focus', name: '猎杀专注', desc: 'Boss 半血以下伤害 +10%', emoji: '🎯', tip: '残血伤害+10%' },
-    { id: 'spark', name: '疾风步法', desc: '有效交换 10% 不耗行动力', emoji: '💨', tip: '10%省行动' }
+    { id: 'sharp', name: '锋锐之刃', desc: '全部伤害 +12%', emoji: '⚔️', tip: '伤害×1.12', scope: 'run' },
+    { id: 'shield', name: '铁壁意志', desc: '下关首回合 +12 护盾（仅该回合）', emoji: '🛡️', tip: '下关首回合+12盾', scope: 'turn' },
+    { id: 'swift', name: '迅捷步伐', desc: '每关开局 +1 行动力', emoji: '⚡', tip: '开局行动+1', scope: 'run' },
+    { id: 'heal', name: '生命涌泉', desc: '生命上限 +10（立即生效）', emoji: '💚', tip: '上限+10', scope: 'run' },
+    { id: 'regen', name: '复苏之泉', desc: '玩家回合结束 25% 净化石化，每选+2 格上限', emoji: '💧', tip: '25%清石化', scope: 'run' },
+    { id: 'bulwark', name: '坚守之躯', desc: 'Boss 每回合反击固定 -2 伤', emoji: '🏰', tip: '反击-2', scope: 'run' },
+    { id: 'sanctuary', name: '圣域护佑', desc: 'Boss 反击伤害 -15%', emoji: '✝️', tip: '反击×0.85', scope: 'run' },
+    { id: 'aegis', name: '天佑护盾', desc: '每回合结束 +2 护盾', emoji: '🌟', tip: '回合末+2盾', scope: 'run' },
+    { id: 'thorns', name: '荆棘反刺', desc: '受 Boss 反击后反弹 4 伤', emoji: '🌵', tip: '受击反伤4', scope: 'run' },
+    { id: 'vitality', name: '强健体魄', desc: '生命上限 +12（立即生效）', emoji: '💪', tip: '上限+12', scope: 'run' },
+    { id: 'flame', name: '烈焰之心', desc: '火焰每次 +2 伤害', emoji: '🔥', tip: '火焰+2/颗', scope: 'run' },
+    { id: 'ember', name: '余烬灼烧', desc: '燃烧跳伤 +4/层', emoji: '🕯️', tip: '燃烧+4', scope: 'run' },
+    { id: 'frostbite', name: '极寒指环', desc: '冻结概率 +15%', emoji: '❄️', tip: '冻结+15%', scope: 'run' },
+    { id: 'spring', name: '春华恬静', desc: '每次消除生命棋 +3 血', emoji: '🌸', tip: '生命消+3血', scope: 'run' },
+    { id: 'break', name: '破岩之力', desc: '无视 Boss 5% 减伤', emoji: '💥', tip: '穿透5%', scope: 'run' },
+    { id: 'chain', name: '连锁大师', desc: '连锁伤害 +10%', emoji: '🔗', tip: '连锁×1.10', scope: 'run' },
+    { id: 'lucky', name: '幸运洗牌', desc: '每关获 1 张洗牌锦囊', emoji: '🍀', tip: '洗牌牌+1', scope: 'run' },
+    { id: 'expand', name: '拓土开疆', desc: '每关开始 20% 几率拓开 1 连通格', emoji: '🗺️', tip: '20%拓格+1', scope: 'run' },
+    { id: 'focus', name: '猎杀专注', desc: 'Boss 半血以下伤害 +10%', emoji: '🎯', tip: '残血伤害+10%', scope: 'run' },
+    { id: 'spark', name: '疾风步法', desc: '有效交换 10% 不耗行动力', emoji: '💨', tip: '10%省行动', scope: 'run' }
   ];
   /** 同锦囊本局最多叠加次数（部分锦囊在 computeMods 内另有数值上限） */
   const BUFF_MAX_STACK = 3;
@@ -232,6 +236,9 @@
   let buffLongPressTimer = 0;
   let buffLongPressTarget = null;
   let buffLongPressFired = false;
+  const BUFF_CARD_PAD = 14;
+  const BUFF_PICK_MIN_MS = 70;
+  const BUFF_LONG_PRESS_MS = 580;
 
   function clearBuffLongPress() {
     if (buffLongPressTimer) clearTimeout(buffLongPressTimer);
@@ -247,7 +254,7 @@
       buffDetail = target;
       buffLongPressFired = true;
       buffLongPressTimer = 0;
-    }, 480);
+    }, BUFF_LONG_PRESS_MS);
   }
 
   function pickBuffDetailTarget(p) {
@@ -466,8 +473,6 @@
   const SAVE_BUILD = 12;
   const MAX_PLAYER_ACTION = 22;
   const AUDIO_KEY = 'xiaoxiaodouzhen_audio';
-  /** Boss 攻击无视护盾的概率（随关卡段递增） */
-  const BOSS_TRUE_DAMAGE_BASE = 0.12;
   const SAVE_KEY = 'xiaoxiaodouzhen_save_v2';
   const PROGRESS_KEY = 'xiaoxiaodouzhen_progress';
   const DEV_KEY = 'xiaoxiaodouzhen_dev';
@@ -874,6 +879,8 @@
   let devGestureTapCount = 0;
   let devGestureLastTap = 0;
   let levelSelectPage = 0;
+  let gameMenuOpen = false;
+  let showPlayerBuffPanel = false;
   const LEVEL_SELECT_PAGE_SIZE = 25;
   const LEVEL_SELECT_COLS = 5;
   let lastFrame = 0;
@@ -1461,6 +1468,14 @@
       && !state.showTutorial && !state.showDevMenu && !state.buffPicker;
   }
 
+  function hitBossArena(p) {
+    if (!layout || !state || isPvp()) return false;
+    const box = layout.boss;
+    const pad = 8;
+    return p.x >= box.x - pad && p.x <= box.x + box.w + pad
+      && p.y >= box.y - pad && p.y <= box.y + box.h + pad;
+  }
+
   function hitPlayerArena(p) {
     if (!layout || !state || isPvp()) return false;
     const box = layout.player;
@@ -1532,20 +1547,49 @@
       if (raw) {
         const p = JSON.parse(raw);
         if (!p.stars || typeof p.stars !== 'object') p.stars = {};
-        return p;
+        return sanitizeProgress(p);
       }
     } catch (_) {}
     return { maxCleared: 0, stars: {} };
   }
 
+  /** 修正历史存档里「当前关卡推进」误标为已通关的问题 */
+  function sanitizeProgress(p) {
+    const stars = p.stars || {};
+    let maxFromStars = 0;
+    for (const k of Object.keys(stars)) {
+      const lv = parseInt(k, 10);
+      if (lv >= 1 && lv <= MAX_LEVEL) maxFromStars = Math.max(maxFromStars, lv);
+    }
+    const mc = p.maxCleared || 0;
+    if (maxFromStars > mc) {
+      p.maxCleared = maxFromStars;
+    } else if (maxFromStars > 0 && mc > maxFromStars) {
+      const starCount = Object.keys(stars).length;
+      if (starCount < mc) p.maxCleared = maxFromStars;
+    }
+    return p;
+  }
+
+  function isLevelUnlocked(level) {
+    const lv = clamp(Math.floor(level), 1, MAX_LEVEL);
+    return lv <= getMaxSelectableLevel();
+  }
+
   function levelBaseAction(level) {
-    return Math.min(MAX_PLAYER_ACTION, 12 + Math.floor((level - 1) * 0.5));
+    return Math.min(MAX_PLAYER_ACTION, 14 + Math.floor((level - 1) * 0.5));
   }
 
   function getBossTrueDamageChance() {
     if (!state || isPvp()) return 0;
     const seg = Math.floor((state.level - 1) / BOSS_SEGMENT);
-    return clamp(BOSS_TRUE_DAMAGE_BASE + seg * 0.015 + (state.level - 1) * 0.0012, 0, 0.32);
+    return clamp(BOSS_TRUE_DAMAGE_BASE + seg * 0.02 + (state.level - 1) * 0.0015, 0, 0.38);
+  }
+
+  function getBossDodgeChance() {
+    if (!state || isPvp()) return 0;
+    const seg = Math.floor((state.level - 1) / BOSS_SEGMENT);
+    return clamp(BOSS_DODGE_BASE + seg * 0.015 + (state.level - 1) * 0.001, 0, 0.28);
   }
 
   function getBuffShieldCarryover(src = state) {
@@ -1597,9 +1641,9 @@
 
   function getLevelStars(level) {
     const lv = clamp(Math.floor(level), 1, MAX_LEVEL);
-    if (lv > getMaxClearedLevel()) return 0;
+    if (!isLevelUnlocked(lv)) return 0;
     const stored = loadProgress().stars?.[String(lv)];
-    return stored ? clamp(stored, 1, 3) : 1;
+    return stored ? clamp(stored, 1, 3) : 0;
   }
 
   function getTotalStars() {
@@ -1779,6 +1823,18 @@
     return loadProgress().maxCleared || 0;
   }
 
+  /** 可选关上限：已通关关 + 当前进行中的关 */
+  function getMaxSelectableLevel() {
+    let max = getMaxClearedLevel();
+    if (state?.mode === 'campaign' && state?.level) {
+      max = Math.max(max, state.level);
+    } else if (hasStoredSave()) {
+      const snap = loadGame();
+      if (snap?.mode === 'campaign' && snap.level) max = Math.max(max, snap.level);
+    }
+    return max;
+  }
+
   function recordLevelCleared(level) {
     const cleared = clamp(Math.floor(level), 1, MAX_LEVEL);
     const p = loadProgress();
@@ -1791,9 +1847,8 @@
   function syncProgressFromSave(data) {
     if (!data || data.mode === 'pvp') return;
     if (data.status === 'win') {
-      if (data.winStars) recordLevelResult(data.level, data.winStars);
-      else recordLevelCleared(data.level);
-    } else if (data.level > 1) recordLevelCleared(data.level - 1);
+      recordLevelResult(data.level, data.winStars || 1);
+    }
   }
 
   function isValidSaveData(data) {
@@ -1823,7 +1878,7 @@
   }
 
   function saveGame() {
-    if (!state || state.showTutorial || state.showModeSelect) return;
+    if (!state || state.showTutorial || state.showModeSelect || state.showLevelSelect || state.status === 'menu') return;
     const payload = {
       saveSchema: 2,
       build: SAVE_BUILD,
@@ -2074,23 +2129,31 @@
 
   function startCampaignAtLevel(level) {
     const lv = clamp(Math.floor(level), 1, MAX_LEVEL);
+    if (!isLevelUnlocked(lv)) return;
     clearAllSaves();
     inputLocked = false;
     selected = null;
     drag = null;
     closeDevMenu();
     state = createGameState(lv, { buffs: [], skipTutorial: true, tutorialDone: true });
+    state.showLevelSelect = false;
+    state.showModeSelect = false;
     resetFx();
+    playSfx('click');
     if (layout) spawnPopup(layout.w / 2, layout.h * 0.32, `第 ${lv} 关`, '#b8d4ff', 15);
+    if (audio.settings.musicOn) startBgm();
   }
 
   function openLevelSelect() {
     if (!state) state = { status: 'menu' };
+    gameMenuOpen = false;
+    showPlayerBuffPanel = false;
     state.showLevelSelect = true;
     state.showModeSelect = false;
-    const maxC = getMaxClearedLevel();
+    const maxC = getMaxSelectableLevel();
     levelSelectPage = maxC > 0 ? Math.floor((maxC - 1) / LEVEL_SELECT_PAGE_SIZE) : 0;
     closeDevMenu();
+    syncViewportNow();
   }
 
   function closeLevelSelect() {
@@ -2105,6 +2168,8 @@
     inputLocked = false;
     selected = null;
     drag = null;
+    gameMenuOpen = false;
+    showPlayerBuffPanel = false;
     closeDevMenu();
     state = { showModeSelect: true, status: 'menu' };
     resetFx();
@@ -2261,6 +2326,7 @@
       shuffleCards: 0,
       showTutorial: level === 1 && !opts.skipTutorial && !opts.tutorialDone && !hasSeenTutorial(),
       showModeSelect: false,
+      showLevelSelect: false,
       tutorialPage: 0,
       runBuffs: [...runBuffs],
       buffPicker: null,
@@ -2360,9 +2426,9 @@
       if (id === 'swift') m.startAction += 1;
       if (id === 'heal') m.maxHpBonus += 10;
       if (id === 'regen') m.stonePurgeMax = Math.min(6, m.stonePurgeMax + 2);
-      if (id === 'bulwark') m.counterReduce += 3;
+      if (id === 'bulwark') m.counterReduce += 2;
       if (id === 'sanctuary') m.counterReducePct += 0.15;
-      if (id === 'aegis') m.turnShield += 3;
+      if (id === 'aegis') m.turnShield += 2;
       if (id === 'thorns') m.thornsDmg += 4;
       if (id === 'vitality') m.maxHpBonus += 12;
       if (id === 'flame') m.flameBonus += 2;
@@ -2741,6 +2807,12 @@
   }
 
   function hurtBoss(dmg, big = false) {
+    if (dmg > 0 && Math.random() < getBossDodgeChance()) {
+      playSfx('block');
+      spawnPopup(layout.boss.cx, layout.boss.cy - 12, '闪避', '#c8b0ff', 16, true);
+      burstParticles(layout.boss.cx, layout.boss.cy, '#9b67ff', 6);
+      return;
+    }
     if (dmg > 0) playSfx('bossHit', { big });
     let real = dmg;
     const b = state.boss;
@@ -4182,15 +4254,200 @@
   }
 
   function hitNewGameBtn(p) {
-    const b = getNewGameBtnRect();
+    return hitGameMenu(p);
+  }
+
+  function getGameMenuLayout() {
+    const btn = getNewGameBtnRect();
+    if (!btn || !layout || state?.showModeSelect) return null;
+    const itemH = 30;
+    const gap = 3;
+    const w = Math.max(btn.w, 76);
+    const x = btn.x + btn.w - w;
+    const items = [];
+    let y = btn.y + btn.h + 4;
+    const canReplay = state?.mode === 'campaign' && state?.status === 'playing'
+      && !state.showTutorial && !state.buffPicker && !state.showStarResult;
+    if (canReplay) {
+      items.push({ id: 'replay', label: '重玩本关', x, y, w, h: itemH });
+      y += itemH + gap;
+    }
+    items.push({ id: 'newgame', label: '新游戏', x, y, w, h: itemH });
+    return { btn, items, panel: items.length ? { x, y: btn.y + btn.h + 2, w, h: y + items[items.length - 1].h - btn.y - btn.h - 2 } : null };
+  }
+
+  function drawGameMenu() {
+    const ui = getGameMenuLayout();
+    if (!ui) return;
+    const { btn } = ui;
+    roundRect(btn.x, btn.y, btn.w, btn.h, 8, gameMenuOpen ? 'rgba(100,75,150,0.95)' : 'rgba(80,60,120,0.85)');
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(gameMenuOpen ? '▴' : '☰', btn.x + btn.w / 2, btn.y + btn.h / 2);
+    ctx.textBaseline = 'alphabetic';
+    if (!gameMenuOpen) return;
+    ui.items.forEach((item) => {
+      const g = ctx.createLinearGradient(item.x, item.y, item.x, item.y + item.h);
+      g.addColorStop(0, item.id === 'replay' ? '#5a4888' : '#6a4a78');
+      g.addColorStop(1, '#2a2238');
+      roundRect(item.x, item.y, item.w, item.h, 8, g);
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(item.label, item.x + item.w / 2, item.y + item.h / 2);
+    });
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function hitGameMenu(p) {
+    const ui = getGameMenuLayout();
+    if (!ui) return false;
+    const pad = 10;
+    const hit = (r) => p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
+    if (gameMenuOpen) {
+      for (const item of ui.items) {
+        if (hit(item)) {
+          gameMenuOpen = false;
+          playSfx('click');
+          if (item.id === 'replay') restartCurrentLevel();
+          else if (item.id === 'newgame') startNewGame();
+          return true;
+        }
+      }
+    }
+    if (hit(ui.btn)) {
+      gameMenuOpen = !gameMenuOpen;
+      playSfx('click');
+      return true;
+    }
+    if (gameMenuOpen) {
+      gameMenuOpen = false;
+      return false;
+    }
+    return false;
+  }
+
+  function restartCurrentLevel() {
+    if (!state || state.mode !== 'campaign' || state.status !== 'playing') return;
+    const lv = state.level;
+    const buffs = state.runBuffs || [];
+    inputLocked = false;
+    selected = null;
+    drag = null;
+    showPlayerBuffPanel = false;
+    clearAllSaves();
+    state = createGameState(lv, {
+      buffs,
+      ...getBuffShieldCarryover(),
+      applyPendingShield: true,
+      skipTutorial: true,
+      tutorialDone: true
+    });
+    resetFx();
+    if (layout) spawnPopup(layout.w / 2, layout.h * 0.32, `重玩第 ${lv} 关`, '#b8d4ff', 14);
+    if (audio.settings.musicOn) startBgm();
+  }
+
+  function togglePlayerBuffPanel() {
+    if (!state?.runBuffs?.length && !isPvp()) return;
+    showPlayerBuffPanel = !showPlayerBuffPanel;
+    playSfx('click');
+  }
+
+  function hitPlayerBuffPanel(p) {
+    const panel = layout?.playerBuffPanel;
+    if (!panel) return false;
+    return p.x >= panel.x && p.x <= panel.x + panel.w && p.y >= panel.y && p.y <= panel.y + panel.h;
+  }
+
+  function drawPlayerBuffPanelOverlay(runBuffs, worldX, worldY, arenaW, arenaH) {
+    const entries = getUniqueBuffEntries(runBuffs);
+    if (!entries.length) return [];
+    const size = layout.compact ? 22 : 24;
+    const gap = 5;
+    const cols = Math.min(5, entries.length);
+    const rows = Math.ceil(entries.length / cols);
+    const gridW = cols * size + (cols - 1) * gap;
+    const gridH = rows * size + (rows - 1) * gap;
+    const panelPad = 10;
+    const panelW = gridW + panelPad * 2;
+    const panelH = gridH + panelPad * 2 + 16;
+    let panelX = worldX + arenaW / 2 - panelW / 2;
+    let panelY = worldY - panelH - 6;
+    if (panelY < layout.safe.top + 2) panelY = worldY + arenaH + 6;
+    panelX = clamp(panelX, layout.pad, layout.w - layout.padR - panelW);
+    roundRect(panelX, panelY, panelW, panelH, 10, 'rgba(20,16,32,0.97)');
+    ctx.strokeStyle = 'rgba(255,220,120,0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = withMixedFont(11, 'bold');
+    ctx.textAlign = 'center';
+    ctx.fillText(`锦囊 ×${runBuffs.length}`, panelX + panelW / 2, panelY + 14);
+    const chips = [];
+    const x0 = panelX + panelPad;
+    const y0 = panelY + 22;
+    entries.forEach((e, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = x0 + col * (size + gap);
+      const y = y0 + row * (size + gap);
+      chips.push(drawOneBuffChip(x, y, size, e, 0, 0));
+    });
+    layout.playerBuffPanel = { x: panelX, y: panelY, w: panelW, h: panelH };
+    return chips;
+  }
+
+  function getBuffPickerExitBtn() {
+    if (!state?.buffPicker || !layout) return null;
+    const cards = getBuffCardRects();
+    if (!cards.length) return null;
+    const bottom = Math.max(...cards.map((c) => c.y + c.h));
+    const w = 132;
+    const h = 36;
+    return {
+      x: layout.w / 2 - w / 2,
+      y: Math.min(bottom + 14, layout.h - layout.safe.bottom - h - 8),
+      w,
+      h
+    };
+  }
+
+  function hitBuffPickerExit(p) {
+    const b = getBuffPickerExitBtn();
     if (!b) return false;
-    const pad = 12;
+    const pad = 10;
     return p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad;
+  }
+
+  function exitGameSaveAndQuit() {
+    if (!state || state.mode !== 'campaign') return;
+    if (!state.buffPicker && state.status !== 'win') return;
+    playSfx('click');
+    saveGame();
+    gameMenuOpen = false;
+    showPlayerBuffPanel = false;
+    buffDetail = null;
+    inputLocked = false;
+    selected = null;
+    drag = null;
+    state = { showModeSelect: true, status: 'menu' };
+    resetFx();
+    if (layout) spawnPopup(layout.w / 2, layout.h * 0.3, '进度已保存', '#b8ffd0', 15);
   }
 
   function getLevelSelectBtnRect() {
     if (!layout || !state || isPvp() || state.showModeSelect || state.showLevelSelect) return null;
-    if (getMaxClearedLevel() < 1) return null;
+    if (getMaxSelectableLevel() < 1) return null;
     const safe = readSafeInsets();
     const pad = 8 + safe.left;
     const top = safe.top + pad;
@@ -4253,31 +4510,73 @@
     };
   }
 
-  /** 选关界面点击；返回 true 表示已消费 */
-  function hitLevelSelect(p) {
+  const LEVEL_SELECT_CELL_PAD = 14;
+  const LEVEL_SELECT_MOVE_TOL = 28;
+  const LEVEL_SELECT_MIN_MS = 50;
+
+  function hitLevelSelectCellAt(p, pad = LEVEL_SELECT_CELL_PAD) {
+    const ui = getLevelSelectLayout();
+    if (!ui) return null;
+    for (const c of ui.cells) {
+      if (p.x >= c.x - pad && p.x <= c.x + c.w + pad && p.y >= c.y - pad && p.y <= c.y + c.h + pad) return c;
+    }
+    return null;
+  }
+
+  /** 选关：导航按钮在按下时响应，关卡格子在抬起时确认 */
+  function hitLevelSelectPointerDown(p) {
     const ui = getLevelSelectLayout();
     if (!ui) return true;
-    const pad = 8;
+    const pad = 10;
     const hit = (r) => p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
     if (hit(ui.back)) {
+      levelSelectPress = null;
       closeLevelSelect();
       return true;
     }
     if (ui.page > 0 && hit(ui.pagePrev)) {
+      levelSelectPress = null;
       levelSelectPage--;
       return true;
     }
     if (ui.page < ui.pageCount - 1 && hit(ui.pageNext)) {
+      levelSelectPress = null;
       levelSelectPage++;
       return true;
     }
-    const maxCleared = getMaxClearedLevel();
-    for (const c of ui.cells) {
-      if (p.x >= c.x && p.x <= c.x + c.w && p.y >= c.y && p.y <= c.y + c.h) {
-        if (c.level <= maxCleared) startCampaignAtLevel(c.level);
-        return true;
-      }
+    const cell = hitLevelSelectCellAt(p);
+    if (cell) {
+      levelSelectPress = { level: cell.level, x: p.x, y: p.y, t: Date.now() };
+    } else {
+      levelSelectPress = null;
     }
+    return true;
+  }
+
+  function tryConfirmLevelSelect(p) {
+    if (!state?.showLevelSelect || !levelSelectPress) return false;
+    const press = levelSelectPress;
+    levelSelectPress = null;
+    const elapsed = Date.now() - press.t;
+    const dx = p.x - press.x;
+    const dy = p.y - press.y;
+    if (elapsed < LEVEL_SELECT_MIN_MS) return false;
+    if (dx * dx + dy * dy > LEVEL_SELECT_MOVE_TOL * LEVEL_SELECT_MOVE_TOL) return false;
+    const cell = hitLevelSelectCellAt(p);
+    if (cell && cell.level !== press.level) return false;
+    if (!cell) {
+      const ui = getLevelSelectLayout();
+      const orig = ui?.cells.find((c) => c.level === press.level);
+      if (!orig) return false;
+      const pad = LEVEL_SELECT_CELL_PAD;
+      if (!(p.x >= orig.x - pad && p.x <= orig.x + orig.w + pad
+        && p.y >= orig.y - pad && p.y <= orig.y + orig.h + pad)) return false;
+    }
+    if (!isLevelUnlocked(press.level)) {
+      playSfx('click');
+      return true;
+    }
+    startCampaignAtLevel(press.level);
     return true;
   }
 
@@ -4286,6 +4585,7 @@
     if (!ui) return;
     const cx = layout.w / 2;
     const maxCleared = getMaxClearedLevel();
+    const maxSelectable = getMaxSelectableLevel();
 
     ctx.fillStyle = THEME.text;
     ctx.font = withMixedFont(22, 'bold');
@@ -4293,17 +4593,19 @@
     ctx.fillText('选择关卡', cx, ui.titleY);
     ctx.font = withMixedFont(12);
     ctx.fillStyle = THEME.textMuted;
-    ctx.fillText(`已通关 ${maxCleared} / ${MAX_LEVEL} · 总星 ${getTotalStars()}`, cx, ui.titleY + 22);
+    ctx.fillText(`可挑战 1—${maxSelectable} 关 · 已通关 ${maxCleared} / ${MAX_LEVEL} · 总星 ${getTotalStars()}`, cx, ui.titleY + 22);
 
     ui.cells.forEach((c) => {
-      const unlocked = c.level <= maxCleared;
+      const unlocked = isLevelUnlocked(c.level);
+      const cleared = c.level <= maxCleared;
+      const stars = cleared ? getLevelStars(c.level) : 0;
       const shape = boardShapeForLevel(c.level);
       const shapeLabel = BOARD_SHAPE_LABELS[shape] || '满盘';
       const boss = BOSS_META[bossForLevel(c.level)]?.name || '';
       const cellG = ctx.createLinearGradient(c.x, c.y, c.x, c.y + c.h);
       if (unlocked) {
-        cellG.addColorStop(0, '#524078');
-        cellG.addColorStop(1, '#342a58');
+        cellG.addColorStop(0, cleared ? '#524078' : '#484068');
+        cellG.addColorStop(1, cleared ? '#342a58' : '#2e2850');
       } else {
         cellG.addColorStop(0, '#2a2838');
         cellG.addColorStop(1, '#1e1c28');
@@ -4313,10 +4615,10 @@
       ctx.fillStyle = unlocked ? '#fff' : 'rgba(255,255,255,0.25)';
       ctx.font = withMixedFont(17, 'bold');
       ctx.fillText(String(c.level), c.x + c.w / 2, c.y + c.h * 0.38);
-      if (unlocked) drawStarRating(c.x + c.w / 2, c.y + c.h * 0.58, getLevelStars(c.level), 3, 10, true);
+      if (stars > 0) drawStarRating(c.x + c.w / 2, c.y + c.h * 0.58, stars, 3, 10, true);
       ctx.font = withMixedFont(9);
-      ctx.fillStyle = unlocked ? 'rgba(255,230,200,0.8)' : 'rgba(255,255,255,0.18)';
-      const sub = shapeLabel === '满盘' ? boss.slice(0, 4) : shapeLabel;
+      ctx.fillStyle = unlocked ? (cleared ? 'rgba(255,230,200,0.8)' : 'rgba(200,220,255,0.85)') : 'rgba(255,255,255,0.18)';
+      const sub = !cleared && unlocked ? '进行中' : (shapeLabel === '满盘' ? boss.slice(0, 4) : shapeLabel);
       ctx.fillText(sub, c.x + c.w / 2, c.y + c.h - 8);
     });
 
@@ -4944,6 +5246,7 @@
       return;
     }
     if (state.status === 'win' && !state.canAdvance) return;
+    if (state.status === 'playing') return;
     let next = state.level;
     const buffs = state.runBuffs || [];
     if (state.status === 'win' && state.level < MAX_LEVEL) next = state.level + 1;
@@ -4968,7 +5271,7 @@
     drag = null;
   }
 
-  function hitBuffCard(p, pad = 8) {
+  function hitBuffCard(p, pad = BUFF_CARD_PAD) {
     const cards = getBuffCardRects();
     for (let i = 0; i < cards.length; i++) {
       const c = cards[i];
@@ -4979,7 +5282,7 @@
 
   function onBuffCardPointerDown(p) {
     buffCardPress = null;
-    const idx = hitBuffCard(p, 4);
+    const idx = hitBuffCard(p, BUFF_CARD_PAD);
     if (idx < 0) return;
     buffCardPress = { idx, x: p.x, y: p.y, t: Date.now() };
     const buff = state.buffPicker.choices[idx];
@@ -4996,12 +5299,12 @@
     const elapsed = Date.now() - press.t;
     const dx = p.x - press.x;
     const dy = p.y - press.y;
-    if (dx * dx + dy * dy > 16 * 16) return false;
-    if (elapsed < 140) return false;
-    if (elapsed >= 460) return false;
-    const idx = hitBuffCard(p, 8);
-    if (idx !== press.idx) return false;
-    applyChosenBuff(state.buffPicker.choices[idx].id);
+    if (dx * dx + dy * dy > BUFF_CARD_PAD * BUFF_CARD_PAD * 4) return false;
+    if (elapsed < BUFF_PICK_MIN_MS) return false;
+    if (elapsed >= BUFF_LONG_PRESS_MS - 50) return false;
+    const upIdx = hitBuffCard(p, BUFF_CARD_PAD);
+    if (upIdx >= 0 && upIdx !== press.idx) return false;
+    applyChosenBuff(state.buffPicker.choices[press.idx].id);
     return true;
   }
 
@@ -5040,7 +5343,7 @@
       return true;
     }
     if (state?.showLevelSelect) {
-      return hitLevelSelect(p);
+      return hitLevelSelectPointerDown(p);
     }
     if (state?.showStarResult) {
       if (hitStarResultContinue(p)) dismissStarResult();
@@ -5053,18 +5356,29 @@
       return hitPvpSetup(p);
     }
     if (state.buffPicker) {
+      if (hitBuffPickerExit(p)) {
+        exitGameSaveAndQuit();
+        return true;
+      }
       onBuffCardPointerDown(p);
       return true;
     }
-    if (!state.showTutorial && hitNewGameBtn(p)) {
-      startNewGame();
+    if (!state.showTutorial && hitGameMenu(p)) {
       return true;
     }
     if (hitLevelSelectBtn(p)) {
       openLevelSelect();
       return true;
     }
-    if (canRegisterDevGesture() && hitPlayerArena(p)) {
+    if (showPlayerBuffPanel) {
+      if (hitPlayerBuffPanel(p)) return false;
+      if (!hitPlayerArena(p)) showPlayerBuffPanel = false;
+    }
+    if (state?.status === 'playing' && !state.showTutorial && hitPlayerArena(p) && !hitPlayerBuffPanel(p)) {
+      togglePlayerBuffPanel();
+      return true;
+    }
+    if (canRegisterDevGesture() && hitBossArena(p)) {
       registerDevGestureTap();
       return true;
     }
@@ -5092,9 +5406,14 @@
 
   function onPointerDown(e) {
     if (e.cancelable) e.preventDefault();
+    if (state?.showLevelSelect || state?.showModeSelect || state?.buffPicker
+      || state?.showPvpSetup || state?.showStarResult) {
+      syncViewportNow();
+    }
     clearBuffLongPress();
     buffLongPressFired = false;
     buffCardPress = null;
+    if (!state?.showLevelSelect) levelSelectPress = null;
     const p = pointFromEvent(e);
     if (buffDetail) {
       if (hitBuffDetailDismiss(p)) buffDetail = null;
@@ -5135,9 +5454,14 @@
       return;
     }
     if (menuHandledOnDown) {
+      if (state?.showLevelSelect || state?.buffPicker) syncViewportNow();
       const p = pointFromEvent(e);
       if (!buffLongPressFired) {
-        if (state?.buffPicker) tryConfirmBuffCardPick(p);
+        if (state?.buffPicker) {
+          if (hitBuffPickerExit(p)) exitGameSaveAndQuit();
+          else tryConfirmBuffCardPick(p);
+        }
+        else if (state?.showLevelSelect) tryConfirmLevelSelect(p);
         else if (state?.showDevMenu) {
           const cell = hitDevBuffCell(p);
           if (cell) devAddBuff(cell.id);
@@ -5243,6 +5567,7 @@
     flushBossIntro();
     buffChipHitAreas = [];
     layout.buffDetailPanel = null;
+    layout.playerBuffPanel = null;
     ctx.clearRect(0, 0, layout.w, layout.h);
     drawBg();
     drawTitle();
@@ -5342,16 +5667,7 @@
     const y0 = layout.headerTop + (compact ? 8 : 12);
     const ng = getNewGameBtnRect();
     if (ng && !state.showTutorial && !state.showModeSelect) {
-      roundRect(ng.x, ng.y, ng.w, ng.h, 8, 'rgba(80,60,120,0.85)');
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.fillStyle = '#ffe9a8';
-      ctx.font = 'bold 11px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('新游戏', ng.x + ng.w / 2, ng.y + ng.h / 2);
-      ctx.textBaseline = 'alphabetic';
+      drawGameMenu();
     }
     ctx.fillStyle = '#fff';
     ctx.font = compact ? 'bold 15px sans-serif' : 'bold 17px sans-serif';
@@ -5565,8 +5881,12 @@
       ctx.fillText(`⚡${state.action}`, p.w / 2 - 36, p.h - 8);
       ctx.fillStyle = '#ffe9a8';
       ctx.fillText(`🛡${state.shield}`, p.w / 2 + 36, p.h - 8);
-      if (state.runBuffs?.length) {
-        buffChipHitAreas.push(...drawBuffChipsBesideHero(state.runBuffs, heroLocalX, heroLocalY, scale, p.x + shake, p.y, p.w));
+      if (state.runBuffs?.length && showPlayerBuffPanel) {
+        buffChipHitAreas.push(...drawPlayerBuffPanelOverlay(state.runBuffs, p.x + shake, p.y, p.w, p.h));
+      } else if (state.runBuffs?.length) {
+        ctx.fillStyle = '#ffe9a8';
+        ctx.font = withMixedFont(9, 'bold');
+        ctx.fillText(`锦囊${state.runBuffs.length}`, heroLocalX, heroLocalY - 22 * scale);
       }
     } else {
       const p1 = getPvpPlayer(1);
@@ -6810,6 +7130,19 @@
         ty += 11;
       });
     });
+    const exitBtn = getBuffPickerExitBtn();
+    if (exitBtn) {
+      roundRect(exitBtn.x, exitBtn.y, exitBtn.w, exitBtn.h, 10, '#3d3558');
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = withMixedFont(13, 'bold');
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('保存并退出', exitBtn.x + exitBtn.w / 2, exitBtn.y + exitBtn.h / 2);
+      ctx.textBaseline = 'alphabetic';
+    }
   }
 
   function drawFx() {
@@ -6879,6 +7212,7 @@
   }
 
   function drawButton() {
+    if (!isPvp() && state.status === 'playing' && !state.showStarResult) return;
     const b = layout.button;
     const label = btnLabel();
     const disabled = state.showStarResult || state.buffPicker || (state.status === 'win' && !state.canAdvance)
@@ -6907,7 +7241,7 @@
     if (state.status === 'win' && state.level < MAX_LEVEL) return '进入下一关';
     if (state.status === 'lose') return `重试第 ${state.level} 关`;
     if (state.status === 'win') return '再来一轮';
-    return `重开本关`;
+    return '继续';
   }
 
   function drawTutorial() {
@@ -7022,6 +7356,7 @@
   let lastTapAt = 0;
   let menuHandledOnDown = false;
   let buffCardPress = null;
+  let levelSelectPress = null;
   function guardDoubleTap(fn) {
     return (e) => {
       const menuOpen = state?.buffPicker || state?.showStarResult || state?.showLevelSelect
