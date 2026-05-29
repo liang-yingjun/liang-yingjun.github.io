@@ -996,6 +996,7 @@
     unlocked: false,
     panelOpen: false,
     dragVolume: false,
+    bgmNeedsRestart: false,
     settings: { musicOn: true, sfxOn: true, volume: 0.65 }
   };
 
@@ -1198,6 +1199,7 @@
       if (fn) fn();
     };
     if (audio.ctx.state === 'suspended') {
+      audio.bgmNeedsRestart = true;
       audio.ctx.resume().then(run).catch(() => {});
     } else {
       run();
@@ -1207,7 +1209,11 @@
   function unlockAudio() {
     withAudioContextReady(() => {
       audio.unlocked = true;
-      if (audio.settings.musicOn) startBgm();
+      if (!audio.settings.musicOn) return;
+      if (!audio.bgmTimer || audio.bgmNeedsRestart) {
+        audio.bgmNeedsRestart = false;
+        startBgm();
+      }
     });
   }
 
@@ -1215,22 +1221,34 @@
   function resumeAudioIfNeeded(forceRestart = false) {
     withAudioContextReady(() => {
       if (!audio.settings.musicOn) return;
-      if (forceRestart || !audio.bgmTimer) startBgm();
+      if (forceRestart) audio.bgmNeedsRestart = true;
+      if (forceRestart || !audio.bgmTimer || audio.bgmNeedsRestart) {
+        audio.bgmNeedsRestart = false;
+        startBgm();
+      }
     });
   }
 
   function ensureBgmPlaying() {
     withAudioContextReady(() => {
-      if (audio.settings.musicOn) startBgm();
+      if (audio.settings.musicOn) {
+        audio.bgmNeedsRestart = false;
+        startBgm();
+      }
     });
   }
 
   function playSfx(kind, opts = {}) {
     if (!audio.settings.sfxOn) return;
-    unlockAudio();
-    if (!audio.ctx) return;
-    const t = audio.ctx.currentTime;
-    const dest = audio.sfxGain;
+    withAudioContextReady(() => {
+      audio.unlocked = true;
+      if (!audio.ctx) return;
+      if (audio.settings.musicOn && (!audio.bgmTimer || audio.bgmNeedsRestart)) {
+        audio.bgmNeedsRestart = false;
+        startBgm();
+      }
+      const t = audio.ctx.currentTime;
+      const dest = audio.sfxGain;
     const chain = opts.chain || 2;
     const count = opts.count || 3;
     switch (kind) {
@@ -1295,6 +1313,7 @@
       default:
         playToneAt(t, 400, 'sine', 0.08, 0.06, dest);
     }
+    });
   }
 
   function getAudioMiniBtnRect() {
@@ -1572,6 +1591,7 @@
 
   function hitPlayerArena(p) {
     if (!layout || !state || isPvp()) return false;
+    if (hitShuffleCardBtn(p)) return false;
     const box = layout.player;
     const pad = 8;
     return p.x >= box.x - pad && p.x <= box.x + box.w + pad
@@ -4173,7 +4193,8 @@
     if ((state.shuffleCards || 0) <= 0) return false;
     const b = layout?.shuffleCardBtn;
     if (!b) return false;
-    return p.x >= b.x - 4 && p.x <= b.x + b.w + 4 && p.y >= b.y - 4 && p.y <= b.y + b.h + 4;
+    const pad = 12;
+    return p.x >= b.x - pad && p.x <= b.x + b.w + pad && p.y >= b.y - pad && p.y <= b.y + b.h + pad;
   }
 
   function findMatches(board) {
@@ -5576,7 +5597,11 @@
       return true;
     }
     if (state?.status === 'playing' && !state.showTutorial && hitShuffleCardBtn(p)) {
-      if (useShuffleCard()) playSfx('click');
+      const ok = useShuffleCard();
+      if (ok) playSfx('click');
+      else if (inputLocked && layout) {
+        spawnPopup(layout.boardX + layout.boardSize / 2, layout.boardY + 18, '动画中，请稍候', '#ccc', 13);
+      }
       return true;
     }
     if (showPlayerBuffPanel) {
@@ -5611,11 +5636,8 @@
 
   function onPointerDown(e) {
     if (e.cancelable) e.preventDefault();
+    syncViewportNow();
     unlockAudio();
-    if (state?.showLevelSelect || state?.showModeSelect || state?.buffPicker
-      || state?.showPvpSetup || state?.showStarResult) {
-      syncViewportNow();
-    }
     clearBuffLongPress();
     buffLongPressFired = false;
     buffCardPress = null;
@@ -6068,8 +6090,9 @@
     const p = layout.player;
     const shake = fx.playerShake > 0 ? Math.sin(animTime / 40) * 4 : 0;
     const hit = fx.playerHit > 0 ? Math.sin(animTime / 30) * 0.07 : 0;
+    const worldX = p.x + shake;
     ctx.save();
-    ctx.translate(p.x + shake, p.y);
+    ctx.translate(worldX, p.y);
     roundRect(0, 0, p.w, p.h, 14, THEME.arena);
     const scale = clamp(p.h / 80, 0.75, 1.1) * (1 + hit);
     const card = layout.shuffleCardBtn;
@@ -6090,12 +6113,10 @@
       ctx.fillText(`⚡${state.action}`, p.w / 2 - 36, p.h - 8);
       ctx.fillStyle = '#ffe9a8';
       ctx.fillText(`🛡${state.shield}`, p.w / 2 + 36, p.h - 8);
-      if (state.runBuffs?.length && showPlayerBuffPanel) {
-        buffChipHitAreas.push(...drawPlayerBuffPanelOverlay(state.runBuffs, p.x + shake, p.y, p.w, p.h));
-      } else if (state.runBuffs?.length) {
+      if (state.runBuffs?.length && !showPlayerBuffPanel) {
         ctx.fillStyle = '#ffe9a8';
         ctx.font = withMixedFont(9, 'bold');
-        ctx.fillText(`锦囊${state.runBuffs.length}`, heroLocalX, heroLocalY - 22 * scale);
+        ctx.fillText(`锦囊${state.runBuffs.length} · 点击查看`, heroLocalX, heroLocalY - 22 * scale);
       }
     } else {
       const p1 = getPvpPlayer(1);
@@ -6105,10 +6126,13 @@
         ctx.fillText(`🛡${p1.shield}`, p.w / 2, p.h - 8);
       }
       if (p1.runBuffs?.length) {
-        buffChipHitAreas.push(...drawBuffChipsBesideHero(p1.runBuffs, heroLocalX, heroLocalY, scale, p.x + shake, p.y, p.w));
+        buffChipHitAreas.push(...drawBuffChipsBesideHero(p1.runBuffs, heroLocalX, heroLocalY, scale, worldX, p.y, p.w));
       }
     }
     ctx.restore();
+    if (!isPvp() && state.runBuffs?.length && showPlayerBuffPanel) {
+      buffChipHitAreas.push(...drawPlayerBuffPanelOverlay(state.runBuffs, worldX, p.y, p.w, p.h));
+    }
   }
 
   function drawBossCharacter(cx, cy, scale, facing) {
@@ -7619,8 +7643,10 @@
   window.addEventListener('pagehide', saveGame);
   window.addEventListener('beforeunload', saveGame);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') saveGame();
-    else {
+    if (document.visibilityState === 'hidden') {
+      saveGame();
+      audio.bgmNeedsRestart = true;
+    } else {
       setTimeout(syncViewportNow, 50);
       resumeAudioIfNeeded(true);
     }
