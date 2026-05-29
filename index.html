@@ -72,7 +72,7 @@
   </style>
 </head>
 <body>
-<div id="gameStage"><canvas id="gameCanvas"></canvas><input id="devLevelInput" type="number" min="1" max="100" inputmode="numeric" autocomplete="off" enterkeyhint="go" aria-label="跳转关卡"></div>
+<div id="gameStage"><canvas id="gameCanvas"></canvas><input id="devLevelInput" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="go" aria-label="跳转关卡"></div>
 <script>
 (() => {
   const GAME_NAME = '消消斗阵';
@@ -122,7 +122,12 @@
   }
   const PVP_BUFF_PICK_COUNT = 3;
   const PVP_BUFF_CHOICE_COUNT = 5;
-  const BOSS_HP_BONUS = 150;
+  /** 前 10 关 Boss HP +15%，11~20 关 +10%，21 关起 +3% */
+  function bossHpLevelMul(level) {
+    if (level <= 10) return 1.15;
+    if (level <= 20) return 1.10;
+    return 1.03;
+  }
   const STONE_CAP = 8;
   const MIN_MOVES = 6;
   /** Boss 攻击无视护盾的基础概率 */
@@ -471,7 +476,7 @@
   ];
   /** 改版时递增，与旧版 localStorage 不兼容，避免误读已删文件时代的存档 */
   const SAVE_BUILD = 12;
-  const MAX_PLAYER_ACTION = 22;
+  const MAX_PLAYER_ACTION = 25;
   const AUDIO_KEY = 'xiaoxiaodouzhen_audio';
   const SAVE_KEY = 'xiaoxiaodouzhen_save_v2';
   const PROGRESS_KEY = 'xiaoxiaodouzhen_progress';
@@ -839,7 +844,7 @@
       const sub = (lv - 1) % BOSS_SEGMENT;
       const boss = bossForLevel(lv);
       const baseHp = 220 + tier * 165 + tier * tier * 14;
-      const hp = Math.floor(baseHp * (1 + sub * 0.065)) + BOSS_HP_BONUS;
+      const hp = Math.floor(baseHp * (1 + sub * 0.065) * bossHpLevelMul(lv));
       const reduction = Math.min(0.40, tier * 0.016 + sub * 0.011 + Math.floor(tier / 4) * 0.008);
       const counter = 7 + tier * 2 + Math.floor(sub / 2) + Math.floor(tier / 3);
       const base = {
@@ -1185,24 +1190,39 @@
     }, 360);
   }
 
-  function unlockAudio() {
+  function withAudioContextReady(fn) {
     ensureAudio();
     if (!audio.ctx) return;
+    const run = () => {
+      applyAudioVolumes();
+      if (fn) fn();
+    };
     if (audio.ctx.state === 'suspended') {
-      audio.ctx.resume().catch(() => {});
+      audio.ctx.resume().then(run).catch(() => {});
+    } else {
+      run();
     }
-    audio.unlocked = true;
-    if (audio.settings.musicOn && !audio.bgmTimer) startBgm();
   }
 
-  function resumeAudioIfNeeded() {
-    ensureAudio();
-    if (!audio.ctx) return;
-    if (audio.ctx.state === 'suspended') {
-      audio.ctx.resume().catch(() => {});
-    }
-    applyAudioVolumes();
-    if (audio.settings.musicOn && !audio.bgmTimer) startBgm();
+  function unlockAudio() {
+    withAudioContextReady(() => {
+      audio.unlocked = true;
+      if (audio.settings.musicOn) startBgm();
+    });
+  }
+
+  /** 页面从后台恢复时需 forceRestart，否则 bgmTimer 仍在但已调度音符会丢失 */
+  function resumeAudioIfNeeded(forceRestart = false) {
+    withAudioContextReady(() => {
+      if (!audio.settings.musicOn) return;
+      if (forceRestart || !audio.bgmTimer) startBgm();
+    });
+  }
+
+  function ensureBgmPlaying() {
+    withAudioContextReady(() => {
+      if (audio.settings.musicOn) startBgm();
+    });
   }
 
   function playSfx(kind, opts = {}) {
@@ -1442,7 +1462,7 @@
     if (hit(ui.musicBtn)) {
       audio.settings.musicOn = !audio.settings.musicOn;
       applyAudioVolumes();
-      if (audio.settings.musicOn) startBgm(); else stopBgm();
+      if (audio.settings.musicOn) ensureBgmPlaying(); else stopBgm();
       saveAudioSettings();
       playSfx('click');
       return true;
@@ -1591,9 +1611,13 @@
 
   function readDevLevelInput() {
     if (!devLevelInput) return;
-    const n = parseInt(devLevelInput.value, 10);
+    const raw = devLevelInput.value.trim();
+    if (raw === '') return;
+    const n = parseInt(raw, 10);
     if (Number.isFinite(n)) devTargetLevel = clamp(n, 1, MAX_LEVEL);
-    devLevelInput.value = String(devTargetLevel);
+    if (document.activeElement !== devLevelInput) {
+      devLevelInput.value = String(devTargetLevel);
+    }
   }
 
   function syncDevLevelInput() {
@@ -1605,14 +1629,14 @@
     const ui = getDevMenuLayout();
     if (!ui) return;
     const r = ui.levelLabel;
-    devLevelInput.min = 1;
-    devLevelInput.max = MAX_LEVEL;
-    devLevelInput.value = String(devTargetLevel);
     devLevelInput.style.display = 'block';
     devLevelInput.style.left = r.x + 'px';
     devLevelInput.style.top = r.y + 'px';
     devLevelInput.style.width = r.w + 'px';
     devLevelInput.style.height = r.h + 'px';
+    if (document.activeElement !== devLevelInput) {
+      devLevelInput.value = String(devTargetLevel);
+    }
   }
 
   function loadProgress() {
@@ -1651,7 +1675,7 @@
   }
 
   function levelBaseAction(level) {
-    return Math.min(MAX_PLAYER_ACTION, 14 + Math.floor((level - 1) * 0.5));
+    return Math.min(MAX_PLAYER_ACTION, 16 + Math.floor((level - 1) * 0.5));
   }
 
   function getBossTrueDamageChance() {
@@ -1699,7 +1723,7 @@
     const base = Math.max(1, startAction || 1);
     const ar = Math.min(1, action / base);
     if (hr >= 0.30 && ar >= 0.30) return 3;
-    if (hr >= 0.15 || ar >= 0.15) return 2;
+    if (hr >= 0.15 && ar >= 0.15) return 2;
     return 1;
   }
 
@@ -1926,7 +1950,7 @@
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.font = withMixedFont(10);
-    ctx.fillText('行动按本关开局值计算 · 三星：生命≥30% 且 行动≥30%', cx, y + 4);
+    ctx.fillText('三星：生命≥30% 且 行动≥30% · 二星：均≥15%', cx, y + 4);
 
     const b = ui.continueBtn;
     const btnG = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
@@ -2238,7 +2262,7 @@
     state = createPvpState(shapeId, buffs1, buffs2, baseHp);
     resetFx();
     fx.displayPvpHp = state.pvp.players.map((p) => p.hp);
-    if (audio.settings.musicOn) startBgm();
+    ensureBgmPlaying();
     if (layout) spawnPopup(layout.w / 2, layout.h * 0.3, '双人对战 · 玩家一先手', '#b8ffd0', 16, true);
     playSfx('win');
   }
@@ -2254,7 +2278,7 @@
     drag = null;
     state = createGameState(1, { buffs: [] });
     resetFx();
-    if (audio.settings.musicOn) startBgm();
+    ensureBgmPlaying();
     if (layout) spawnPopup(layout.w / 2, layout.h * 0.32, '闯关冒险', '#ffe9a8', 14);
   }
 
@@ -2272,7 +2296,7 @@
     resetFx();
     playSfx('click');
     if (layout) spawnPopup(layout.w / 2, layout.h * 0.32, `第 ${lv} 关`, '#b8d4ff', 15);
-    if (audio.settings.musicOn) startBgm();
+    ensureBgmPlaying();
   }
 
   function openLevelSelect() {
@@ -4531,7 +4555,7 @@
     });
     resetFx();
     if (layout) spawnPopup(layout.w / 2, layout.h * 0.32, `重玩第 ${lv} 关`, '#b8d4ff', 14);
-    if (audio.settings.musicOn) startBgm();
+    ensureBgmPlaying();
   }
 
   function togglePlayerBuffPanel() {
@@ -5283,9 +5307,11 @@
       return true;
     }
     if (hit(ui.levelLabel)) {
-      readDevLevelInput();
-      devLevelInput?.focus();
-      devLevelInput?.select();
+      if (devLevelInput) {
+        devLevelInput.value = String(devTargetLevel);
+        devLevelInput.focus();
+        devLevelInput.select();
+      }
       return true;
     }
     if (hit(ui.jump)) {
@@ -5549,6 +5575,10 @@
       openLevelSelect();
       return true;
     }
+    if (state?.status === 'playing' && !state.showTutorial && hitShuffleCardBtn(p)) {
+      if (useShuffleCard()) playSfx('click');
+      return true;
+    }
     if (showPlayerBuffPanel) {
       if (hitPlayerBuffPanel(p)) return false;
       if (!hitPlayerArena(p)) showPlayerBuffPanel = false;
@@ -5576,16 +5606,12 @@
       handlePrimaryAction();
       return true;
     }
-    if (hitShuffleCardBtn(p)) {
-      useShuffleCard();
-      return true;
-    }
     return false;
   }
 
   function onPointerDown(e) {
     if (e.cancelable) e.preventDefault();
-    resumeAudioIfNeeded();
+    unlockAudio();
     if (state?.showLevelSelect || state?.showModeSelect || state?.buffPicker
       || state?.showPvpSetup || state?.showStarResult) {
       syncViewportNow();
@@ -7562,9 +7588,12 @@
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     if (devLevelInput) {
       devLevelInput.addEventListener('input', () => {
-        const n = parseInt(devLevelInput.value, 10);
+        const raw = devLevelInput.value.trim();
+        if (raw === '') return;
+        const n = parseInt(raw, 10);
         if (Number.isFinite(n)) devTargetLevel = clamp(n, 1, MAX_LEVEL);
       });
+      devLevelInput.addEventListener('blur', readDevLevelInput);
       devLevelInput.addEventListener('change', readDevLevelInput);
       devLevelInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
@@ -7593,12 +7622,12 @@
     if (document.visibilityState === 'hidden') saveGame();
     else {
       setTimeout(syncViewportNow, 50);
-      resumeAudioIfNeeded();
+      resumeAudioIfNeeded(true);
     }
   });
   window.addEventListener('pageshow', (e) => {
     syncViewportNow();
-    resumeAudioIfNeeded();
+    resumeAudioIfNeeded(true);
     if (e.persisted) {
       const snap = loadGame();
       if (snap) {
@@ -7615,7 +7644,7 @@
   }
   window.addEventListener('focus', () => {
     syncViewportNow();
-    resumeAudioIfNeeded();
+    resumeAudioIfNeeded(true);
   });
 
   clearLegacySaves();
