@@ -217,6 +217,66 @@
     })).filter((e) => e.buff);
   }
 
+  function getSideRunBuffs(side) {
+    if (isPvp()) {
+      const p = side === 'foe' ? getPvpPlayer(2) : getPvpPlayer(1);
+      return p?.runBuffs || [];
+    }
+    return state?.runBuffs || [];
+  }
+
+  /** 面板展示用：仅被动锦囊，不含已耗尽的洗牌牌 */
+  function getDisplayBuffEntries(runBuffs) {
+    return getUniqueBuffEntries(runBuffs);
+  }
+
+  function getHeroPortraitRect(side) {
+    if (!layout || !state) return null;
+    const arena = side === 'foe' ? layout.boss : layout.player;
+    if (!arena) return null;
+    const card = side === 'ally' && !isPvp() ? layout.shuffleCardBtn : null;
+    const heroLocalX = (side === 'ally' && (state.shuffleCards || 0) > 0 && card && !isPvp())
+      ? card.w + 8 + (arena.w - card.w - 16) / 2
+      : arena.w / 2;
+    const heroLocalY = side === 'foe' ? arena.h * 0.55 : arena.h * 0.52;
+    const scale = clamp(arena.h / (side === 'foe' ? 88 : 80), 0.75, 1.15);
+    const r = 34 * scale;
+    return {
+      x: arena.x + heroLocalX - r,
+      y: arena.y + heroLocalY - r,
+      w: r * 2,
+      h: r * 2
+    };
+  }
+
+  function hitHeroPortrait(side, p) {
+    const buffs = getSideRunBuffs(side);
+    if (!buffs.length) return false;
+    if (side === 'ally' && hitShuffleCardBtn(p)) return false;
+    const r = getHeroPortraitRect(side);
+    if (!r) return false;
+    const pad = 10;
+    return p.x >= r.x - pad && p.x <= r.x + r.w + pad
+      && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
+  }
+
+  function closeExpandedBuffPanel() {
+    expandedBuffSide = null;
+  }
+
+  function toggleBuffPanel(side) {
+    const buffs = getSideRunBuffs(side);
+    if (!buffs.length) return;
+    expandedBuffSide = expandedBuffSide === side ? null : side;
+    playSfx('click');
+  }
+
+  function hitExpandedBuffPanel(p) {
+    const panel = layout?.expandedBuffPanel;
+    if (!panel) return false;
+    return p.x >= panel.x && p.x <= panel.x + panel.w && p.y >= panel.y && p.y <= panel.y + panel.h;
+  }
+
   function wrapCanvasText(text, maxWidth, font) {
     ctx.font = font;
     const lines = [];
@@ -949,7 +1009,7 @@
   let devGestureLastTap = 0;
   let levelSelectPage = 0;
   let gameMenuOpen = false;
-  let showPlayerBuffPanel = false;
+  let expandedBuffSide = null;
   const LEVEL_SELECT_PAGE_SIZE = 25;
   const LEVEL_SELECT_COLS = 5;
   let lastFrame = 0;
@@ -1042,7 +1102,7 @@
   function applyAudioVolumes() {
     const v = audio.settings.volume;
     if (audio.master) audio.master.gain.value = v;
-    if (audio.bgmGain) audio.bgmGain.gain.value = audio.settings.musicOn ? 0.24 : 0;
+    if (audio.bgmGain) audio.bgmGain.gain.value = audio.settings.musicOn ? 0.32 : 0;
     if (audio.sfxGain) audio.sfxGain.gain.value = audio.settings.sfxOn ? 0.78 : 0;
   }
 
@@ -1053,19 +1113,20 @@
   }
 
   function playToneAt(t, freq, type, dur, peak, dest, detune = 0) {
-    if (!audio.ctx || !dest || peak <= 0) return;
+    if (!audio.ctx || !dest || peak <= 0 || audio.ctx.state !== 'running') return;
     const osc = audio.ctx.createOscillator();
     const g = audio.ctx.createGain();
     osc.type = type;
     osc.frequency.value = Math.max(40, freq);
     osc.detune.value = detune;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(peak, t + 0.025);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    const end = t + Math.max(0.05, dur);
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.02);
+    g.gain.linearRampToValueAtTime(0.001, end);
     osc.connect(g);
     g.connect(dest);
     osc.start(t);
-    osc.stop(t + dur + 0.04);
+    osc.stop(end + 0.05);
   }
 
   function playNoiseAt(t, dur, peak, dest, freq = 9000) {
@@ -1183,66 +1244,82 @@
 
   function startBgm() {
     stopBgm();
-    if (!audio.ctx || !audio.settings.musicOn) return;
+    if (!audio.ctx || audio.ctx.state !== 'running' || !audio.settings.musicOn) return;
     scheduleBgmBeat(0);
     audio.bgmTimer = setInterval(() => {
+      if (!audio.ctx || audio.ctx.state !== 'running') return;
       audio.bgmStep += 1;
       scheduleBgmBeat(audio.bgmStep);
     }, 360);
   }
 
-  function withAudioContextReady(fn) {
-    ensureAudio();
-    if (!audio.ctx) return;
-    const run = () => {
+  async function initAudio() {
+    try {
+      if (!audio.ctx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return false;
+        audio.ctx = new Ctx();
+        audio.master = audio.ctx.createGain();
+        audio.bgmGain = audio.ctx.createGain();
+        audio.sfxGain = audio.ctx.createGain();
+        audio.bgmGain.connect(audio.master);
+        audio.sfxGain.connect(audio.master);
+        audio.master.connect(audio.ctx.destination);
+      }
+      if (audio.ctx.state === 'suspended') await audio.ctx.resume();
       applyAudioVolumes();
-      if (fn) fn();
-    };
-    if (audio.ctx.state === 'suspended') {
-      audio.bgmNeedsRestart = true;
-      audio.ctx.resume().then(run).catch(() => {});
-    } else {
-      run();
+      return audio.ctx.state === 'running';
+    } catch (_) {
+      return false;
     }
   }
 
-  function unlockAudio() {
-    withAudioContextReady(() => {
+  function syncAudio(forceBgm = false) {
+    initAudio().then((ok) => {
+      if (!ok) return;
       audio.unlocked = true;
-      if (!audio.settings.musicOn) return;
-      if (!audio.bgmTimer || audio.bgmNeedsRestart) {
+      if (!audio.settings.musicOn) {
+        stopBgm();
+        return;
+      }
+      if (forceBgm || !audio.bgmTimer || audio.bgmNeedsRestart) {
         audio.bgmNeedsRestart = false;
         startBgm();
       }
     });
   }
 
-  /** 页面从后台恢复时需 forceRestart，否则 bgmTimer 仍在但已调度音符会丢失 */
+  function unlockAudio() {
+    syncAudio(true);
+  }
+
   function resumeAudioIfNeeded(forceRestart = false) {
-    withAudioContextReady(() => {
-      if (!audio.settings.musicOn) return;
-      if (forceRestart) audio.bgmNeedsRestart = true;
-      if (forceRestart || !audio.bgmTimer || audio.bgmNeedsRestart) {
-        audio.bgmNeedsRestart = false;
-        startBgm();
-      }
-    });
+    if (forceRestart) audio.bgmNeedsRestart = true;
+    syncAudio(forceRestart || audio.bgmNeedsRestart);
   }
 
   function ensureBgmPlaying() {
-    withAudioContextReady(() => {
-      if (audio.settings.musicOn) {
-        audio.bgmNeedsRestart = false;
-        startBgm();
-      }
-    });
+    syncAudio(true);
+  }
+
+  let audioWatchAt = 0;
+  function tickAudio(now) {
+    if (!audio.settings.musicOn) return;
+    if (now - audioWatchAt < 1200) return;
+    audioWatchAt = now;
+    if (!audio.unlocked) return;
+    if (!audio.ctx || audio.ctx.state !== 'running' || !audio.bgmTimer) {
+      audio.bgmNeedsRestart = true;
+      syncAudio(true);
+    }
   }
 
   function playSfx(kind, opts = {}) {
     if (!audio.settings.sfxOn) return;
-    withAudioContextReady(() => {
+    initAudio().then((ok) => {
+      if (!ok || !audio.ctx || audio.ctx.state !== 'running') return;
       audio.unlocked = true;
-      if (!audio.ctx) return;
+      applyAudioVolumes();
       if (audio.settings.musicOn && (!audio.bgmTimer || audio.bgmNeedsRestart)) {
         audio.bgmNeedsRestart = false;
         startBgm();
@@ -2322,7 +2399,7 @@
   function openLevelSelect() {
     if (!state) state = { status: 'menu' };
     gameMenuOpen = false;
-    showPlayerBuffPanel = false;
+    closeExpandedBuffPanel();
     state.showLevelSelect = true;
     state.showModeSelect = false;
     const maxC = getMaxSelectableLevel();
@@ -2344,7 +2421,7 @@
     selected = null;
     drag = null;
     gameMenuOpen = false;
-    showPlayerBuffPanel = false;
+    closeExpandedBuffPanel();
     closeDevMenu();
     state = { showModeSelect: true, status: 'menu' };
     resetFx();
@@ -4565,7 +4642,7 @@
     inputLocked = false;
     selected = null;
     drag = null;
-    showPlayerBuffPanel = false;
+    closeExpandedBuffPanel();
     clearAllSaves();
     state = createGameState(lv, {
       buffs,
@@ -4579,20 +4656,8 @@
     ensureBgmPlaying();
   }
 
-  function togglePlayerBuffPanel() {
-    if (!state?.runBuffs?.length && !isPvp()) return;
-    showPlayerBuffPanel = !showPlayerBuffPanel;
-    playSfx('click');
-  }
-
-  function hitPlayerBuffPanel(p) {
-    const panel = layout?.playerBuffPanel;
-    if (!panel) return false;
-    return p.x >= panel.x && p.x <= panel.x + panel.w && p.y >= panel.y && p.y <= panel.y + panel.h;
-  }
-
-  function drawPlayerBuffPanelOverlay(runBuffs, worldX, worldY, arenaW, arenaH) {
-    const entries = getUniqueBuffEntries(runBuffs);
+  function drawExpandedBuffPanelOverlay(side, runBuffs, worldX, worldY, arenaW, arenaH) {
+    const entries = getDisplayBuffEntries(runBuffs);
     if (!entries.length) return [];
     const size = layout.compact ? 22 : 24;
     const gap = 5;
@@ -4604,17 +4669,22 @@
     const panelW = gridW + panelPad * 2;
     const panelH = gridH + panelPad * 2 + 16;
     let panelX = worldX + arenaW / 2 - panelW / 2;
-    let panelY = worldY - panelH - 6;
-    if (panelY < layout.safe.top + 2) panelY = worldY + arenaH + 6;
+    let panelY = side === 'foe' ? worldY + arenaH + 6 : worldY - panelH - 6;
+    if (side === 'ally' && panelY < layout.safe.top + 2) panelY = worldY + arenaH + 6;
+    if (side === 'foe' && panelY + panelH > layout.h - layout.safe.bottom - 8) {
+      panelY = worldY - panelH - 6;
+    }
     panelX = clamp(panelX, layout.pad, layout.w - layout.padR - panelW);
     roundRect(panelX, panelY, panelW, panelH, 10, 'rgba(20,16,32,0.97)');
-    ctx.strokeStyle = 'rgba(255,220,120,0.4)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255,220,120,0.55)';
+    ctx.lineWidth = 2;
     ctx.strokeRect(panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1);
     ctx.fillStyle = '#ffe9a8';
     ctx.font = withMixedFont(11, 'bold');
     ctx.textAlign = 'center';
-    ctx.fillText(`锦囊 ×${runBuffs.length}`, panelX + panelW / 2, panelY + 14);
+    const shuffleHint = (!isPvp() && side === 'ally' && (state.shuffleCards || 0) > 0)
+      ? ` · 洗牌牌×${state.shuffleCards}` : '';
+    ctx.fillText(`锦囊 ×${runBuffs.length}${shuffleHint}`, panelX + panelW / 2, panelY + 14);
     const chips = [];
     const x0 = panelX + panelPad;
     const y0 = panelY + 22;
@@ -4625,8 +4695,33 @@
       const y = y0 + row * (size + gap);
       chips.push(drawOneBuffChip(x, y, size, e, 0, 0));
     });
-    layout.playerBuffPanel = { x: panelX, y: panelY, w: panelW, h: panelH };
+    layout.expandedBuffPanel = { x: panelX, y: panelY, w: panelW, h: panelH, side };
     return chips;
+  }
+
+  function drawExpandedBuffPanels() {
+    if (!expandedBuffSide || !layout || !state) return;
+    layout.expandedBuffPanel = null;
+    const buffs = getSideRunBuffs(expandedBuffSide);
+    if (!buffs.length) {
+      closeExpandedBuffPanel();
+      return;
+    }
+    const arena = expandedBuffSide === 'foe' ? layout.boss : layout.player;
+    if (!arena) return;
+    buffChipHitAreas.push(...drawExpandedBuffPanelOverlay(
+      expandedBuffSide, buffs, arena.x, arena.y, arena.w, arena.h
+    ));
+  }
+
+  function drawBuffHintLabel(side, heroLocalX, heroLocalY, scale) {
+    const buffs = getSideRunBuffs(side);
+    if (!buffs.length || expandedBuffSide === side) return;
+    const n = getDisplayBuffEntries(buffs).length;
+    ctx.fillStyle = '#ffe9a8';
+    ctx.font = withMixedFont(9, 'bold');
+    ctx.textAlign = 'center';
+    ctx.fillText(`锦囊${n} · 点击查看`, heroLocalX, heroLocalY - 22 * scale);
   }
 
   function getBuffPickerExitBtn() {
@@ -4657,7 +4752,7 @@
     playSfx('click');
     saveGame();
     gameMenuOpen = false;
-    showPlayerBuffPanel = false;
+    closeExpandedBuffPanel();
     buffDetail = null;
     inputLocked = false;
     selected = null;
@@ -5604,13 +5699,24 @@
       }
       return true;
     }
-    if (showPlayerBuffPanel) {
-      if (hitPlayerBuffPanel(p)) return false;
-      if (!hitPlayerArena(p)) showPlayerBuffPanel = false;
+    if (expandedBuffSide) {
+      if (hitExpandedBuffPanel(p)) return false;
+      if (!hitHeroPortrait('ally', p) && !hitHeroPortrait('foe', p)) closeExpandedBuffPanel();
     }
-    if (state?.status === 'playing' && !state.showTutorial && hitPlayerArena(p) && !hitPlayerBuffPanel(p)) {
-      togglePlayerBuffPanel();
-      return true;
+    if (state?.status === 'playing' && !state.showTutorial) {
+      if (isPvp()) {
+        if (hitHeroPortrait('foe', p)) {
+          toggleBuffPanel('foe');
+          return true;
+        }
+        if (hitHeroPortrait('ally', p)) {
+          toggleBuffPanel('ally');
+          return true;
+        }
+      } else if (hitHeroPortrait('ally', p)) {
+        toggleBuffPanel('ally');
+        return true;
+      }
     }
     if (canRegisterDevGesture() && hitBossArena(p)) {
       registerDevGestureTap();
@@ -5795,7 +5901,7 @@
     flushBossIntro();
     buffChipHitAreas = [];
     layout.buffDetailPanel = null;
-    layout.playerBuffPanel = null;
+    layout.expandedBuffPanel = null;
     ctx.clearRect(0, 0, layout.w, layout.h);
     drawBg();
     drawTitle();
@@ -5818,6 +5924,7 @@
       if (state.status !== 'playing') drawResultOverlay();
     }
     drawBuffDetailOverlay();
+    drawExpandedBuffPanels();
     if (!state.showTutorial && !state.buffPicker && !state.showStarResult) {
       drawAudioPanel();
     }
@@ -6035,9 +6142,7 @@
         ctx.fillText(`🛡${p2.shield}`, b.w / 2, b.h - 8);
       }
       drawHeroCharacter(heroLocalX, heroLocalY, scale, 'down', 'p2');
-      if (p2?.runBuffs?.length) {
-        buffChipHitAreas.push(...drawBuffChipsBesideHero(p2.runBuffs, heroLocalX, heroLocalY, scale, b.x + shake, b.y, b.w));
-      }
+      drawBuffHintLabel('foe', heroLocalX, heroLocalY, scale);
       ctx.restore();
       return;
     }
@@ -6113,11 +6218,7 @@
       ctx.fillText(`⚡${state.action}`, p.w / 2 - 36, p.h - 8);
       ctx.fillStyle = '#ffe9a8';
       ctx.fillText(`🛡${state.shield}`, p.w / 2 + 36, p.h - 8);
-      if (state.runBuffs?.length && !showPlayerBuffPanel) {
-        ctx.fillStyle = '#ffe9a8';
-        ctx.font = withMixedFont(9, 'bold');
-        ctx.fillText(`锦囊${state.runBuffs.length} · 点击查看`, heroLocalX, heroLocalY - 22 * scale);
-      }
+      drawBuffHintLabel('ally', heroLocalX, heroLocalY, scale);
     } else {
       const p1 = getPvpPlayer(1);
       if (p1.shield > 0) {
@@ -6125,14 +6226,9 @@
         ctx.font = withMixedFont(12);
         ctx.fillText(`🛡${p1.shield}`, p.w / 2, p.h - 8);
       }
-      if (p1.runBuffs?.length) {
-        buffChipHitAreas.push(...drawBuffChipsBesideHero(p1.runBuffs, heroLocalX, heroLocalY, scale, worldX, p.y, p.w));
-      }
+      drawBuffHintLabel('ally', heroLocalX, heroLocalY, scale);
     }
     ctx.restore();
-    if (!isPvp() && state.runBuffs?.length && showPlayerBuffPanel) {
-      buffChipHitAreas.push(...drawPlayerBuffPanelOverlay(state.runBuffs, worldX, p.y, p.w, p.h));
-    }
   }
 
   function drawBossCharacter(cx, cy, scale, facing) {
@@ -7582,6 +7678,7 @@
     const dt = Math.min(32, ts - lastFrame || 16);
     lastFrame = ts;
     updateFx(dt);
+    tickAudio(ts);
     render();
     requestAnimationFrame(loop);
   }
@@ -7630,6 +7727,7 @@
   }
 
   bindInput();
+  document.addEventListener('pointerdown', () => unlockAudio(), { passive: true, capture: true });
   window.addEventListener('touchstart', () => {
     unlockAudio();
     if (!state?.buffPicker && !state?.showTutorial) syncViewportNow();
